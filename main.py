@@ -64,7 +64,44 @@ async def search_flights(request):
     return JSONResponse({"success": True, "data": sample_flights})
 
 async def decode_bcbp(request):
-    body = await request.json() if request.method == "POST" else {}
+    try:
+        body = await request.json() if request.method == "POST" else {}
+    except Exception:
+        body = {}
+    raw_bc = body.get("rawBarcode") or body.get("barcode") or ""
+    if raw_bc:
+        try:
+            from services.bcbp_decoder import decode_bcbp as parse_bcbp
+            decoded = parse_bcbp(raw_bc)
+            pname = decoded.get("passenger_name", "LUC DESMARAIS")
+            # Format "DESMARAIS LUC" into "Luc Desmarais"
+            if " " in pname:
+                parts = pname.split()
+                formatted_name = " ".join([p.capitalize() for p in reversed(parts)])
+            else:
+                formatted_name = pname.title()
+
+            return JSONResponse({
+                "success": True,
+                "data": {
+                    "passengerName": formatted_name,
+                    "pnr": decoded.get("pnr", "ABC123"),
+                    "flightNumber": decoded.get("flight_number", "6E 203"),
+                    "airline": {"code": decoded.get("airline_code", "6E"), "name": "IndiGo", "logoUrl": "/logos/indigo.png"},
+                    "origin": decoded.get("origin_iata", "DEL"),
+                    "destination": decoded.get("destination_iata", "MAA"),
+                    "destinationName": "Chennai" if decoded.get("destination_iata") == "MAA" else "London Heathrow",
+                    "scheduledDeparture": "2026-08-12T10:45:00Z",
+                    "terminal": "T2",
+                    "gate": "B12",
+                    "checkinCounters": "45 – 52",
+                    "baggageBelt": "Carousel 4",
+                    "status": "ON_TIME"
+                }
+            })
+        except Exception as e:
+            logger.warning(f"Error parsing BCBP barcode: {e}")
+
     return JSONResponse({
         "success": True,
         "data": {
