@@ -40,11 +40,13 @@ async def search_flights(request):
             "destination": "MAA",
             "destinationName": "Chennai",
             "scheduledDeparture": "2026-08-12T10:45:00Z",
+            "estimatedDeparture": "2026-08-12T11:45:00Z",
             "terminal": "T2",
             "gate": "B12",
             "checkinCounters": "45 – 52",
             "baggageBelt": "Carousel 4",
-            "status": "ON_TIME"
+            "status": "DELAYED",
+            "delayReason": "Late arrival of incoming aircraft from Chennai"
         },
         {
             "id": "fl_ai101",
@@ -59,6 +61,22 @@ async def search_flights(request):
             "checkinCounters": "12 – 24",
             "baggageBelt": "Carousel 9",
             "status": "BOARDING"
+        },
+        {
+            "id": "fl_sg812",
+            "flightNumber": "SG 812",
+            "airline": {"code": "SG", "name": "SpiceJet", "logoUrl": "/logos/spicejet.png"},
+            "origin": "DEL",
+            "destination": "BOM",
+            "destinationName": "Mumbai",
+            "scheduledDeparture": "2026-08-12T10:45:00Z",
+            "estimatedDeparture": "2026-08-12T11:45:00Z",
+            "terminal": "T1",
+            "gate": "C04",
+            "checkinCounters": "08 – 14",
+            "baggageBelt": "Carousel 2",
+            "status": "DELAYED",
+            "delayReason": "Late arrival of incoming aircraft from Mumbai"
         }
     ]
     return JSONResponse({"success": True, "data": sample_flights})
@@ -92,11 +110,13 @@ async def decode_bcbp(request):
                     "destination": decoded.get("destination_iata", "MAA"),
                     "destinationName": "Chennai" if decoded.get("destination_iata") == "MAA" else "London Heathrow",
                     "scheduledDeparture": "2026-08-12T10:45:00Z",
+                    "estimatedDeparture": "2026-08-12T11:45:00Z",
                     "terminal": "T2",
                     "gate": "B12",
                     "checkinCounters": "45 – 52",
                     "baggageBelt": "Carousel 4",
-                    "status": "ON_TIME"
+                    "status": "DELAYED",
+                    "delayReason": "Late arrival of incoming aircraft"
                 }
             })
         except Exception as e:
@@ -113,11 +133,13 @@ async def decode_bcbp(request):
             "destination": "MAA",
             "destinationName": "Chennai",
             "scheduledDeparture": "2026-08-12T10:45:00Z",
+            "estimatedDeparture": "2026-08-12T11:45:00Z",
             "terminal": "T2",
             "gate": "B12",
             "checkinCounters": "45 – 52",
             "baggageBelt": "Carousel 4",
-            "status": "ON_TIME"
+            "status": "DELAYED",
+            "delayReason": "Late arrival of incoming aircraft"
         }
     })
 
