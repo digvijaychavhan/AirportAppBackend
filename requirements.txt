@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+python-socketio
+sqlalchemy
+pydantic
+pydantic-settings
+networkx
+groq
+python-dotenv
+cors

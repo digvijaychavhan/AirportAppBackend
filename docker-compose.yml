@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  airport-backend:
+    build: .
+    container_name: airport_helpdesk_backend
+    restart: always
+    ports:
+      - "5000:5000"
+    environment:
+      - PORT=5000
+      - ENVIRONMENT=production
+      - DATABASE_URL=sqlite:///./app.db
+      - GROQ_API_KEY=${GROQ_API_KEY}
+    volumes:
+      - backend_data:/app/data
+
+volumes:
+  backend_data:
