@@ -94,6 +94,9 @@ async def CALL_REQUEST(sid: str, data: Dict[str, Any]):
     kiosk_id = data.get("kioskId", "Kiosk-01")
     ada_priority = data.get("adaPriority", False)
     language = data.get("language", "EN")
+    passenger_name = data.get("passengerName", "Luc Desmarais")
+    flight_number = data.get("flightNumber", "6E 203")
+    pnr = data.get("pnr", "ABC123")
 
     # Remove any existing pending queued call for this kioskId to prevent duplicates
     call_queue = [c for c in call_queue if c.get("kioskId") != kiosk_id]
@@ -107,6 +110,9 @@ async def CALL_REQUEST(sid: str, data: Dict[str, Any]):
         "adaPriority": ada_priority,
         "language": language,
         "status": "QUEUED",
+        "passengerName": passenger_name,
+        "flightNumber": flight_number,
+        "pnr": pnr,
         "enqueueTime": datetime.utcnow().isoformat()
     }
 

@@ -148,6 +148,9 @@ class SupportCall(Base):
     call_duration_seconds = Column(Integer, default=0)
     issue_category = Column(String, nullable=True)
     operator_notes = Column(Text, nullable=True)
+    passenger_name = Column(String, nullable=True)
+    flight_number = Column(String, nullable=True)
+    pnr = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     kiosk = relationship("Kiosk")

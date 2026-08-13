@@ -5,6 +5,8 @@ Built on Starlette & Socket.IO for maximum execution speed and zero build bottle
 
 import json
 import logging
+from datetime import datetime
+import random
 from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Route
@@ -12,7 +14,7 @@ from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
 import socketio
 
-from services.webrtc_signaling import sio
+from services.webrtc_signaling import sio, active_calls
 from services.pathfinding import compute_indoor_route
 from services.ai_orchestrator import parse_ai_intent
 
@@ -170,28 +172,220 @@ async def get_operator_queue(request):
     from services.webrtc_signaling import call_queue
     return JSONResponse({"success": True, "totalQueued": len(call_queue), "queue": call_queue})
 
-async def get_operator_stats(request):
-    return JSONResponse({
-        "success": True,
-        "data": {
-            "totalInboundCalls": 24,
-            "avgCallTimeMinutes": "3.45",
-            "resolutionRate": "95%",
-            "activeOperators": 3
+async def get_call_details(request):
+    call_id = request.path_params.get("call_id")
+    if call_id in active_calls:
+        return JSONResponse({"success": True, "data": active_calls[call_id]})
+    
+    try:
+        from database import SessionLocal
+        from models import SupportCall
+        db = SessionLocal()
+        call = db.query(SupportCall).filter(SupportCall.id == call_id).first()
+        if call:
+            minutes = call.call_duration_seconds // 60
+            seconds = call.call_duration_seconds % 60
+            dur_str = f"{minutes:02d}:{seconds:02d}"
+            kiosk_code = call.kiosk.code if call.kiosk else (call.kiosk_id or "T3-L1-K04")
+            
+            categories_list = [c.strip() for c in call.issue_category.split(",")] if call.issue_category else []
+
+            data = {
+                "sessionId": call.id,
+                "passengerName": call.passenger_name or "Passenger",
+                "flightNumber": call.flight_number or "",
+                "pnr": call.pnr or "",
+                "kioskId": kiosk_code,
+                "duration": dur_str,
+                "notes": call.operator_notes or "",
+                "categories": categories_list,
+                "date": call.created_at.strftime("%d-%b-%y"),
+                "time": call.created_at.strftime("%I:%M %p"),
+                "status": "RESOLVED"
+            }
+            db.close()
+            return JSONResponse({"success": True, "data": data})
+        db.close()
+    except Exception as e:
+        logger.error(f"Error finding call details: {e}")
+
+    return JSONResponse({"success": False, "message": "Call not found"}, status_code=404)
+
+async def submit_operator_log(request):
+    try:
+        body = await request.json()
+        session_id = body.get("sessionId")
+        kiosk_id = body.get("kioskId", "T3-L1-K04")
+
+        from database import SessionLocal
+        from models import SupportCall, Kiosk
+        
+        db = SessionLocal()
+        
+        kiosk_obj = db.query(Kiosk).filter(Kiosk.id == kiosk_id).first()
+        if not kiosk_obj:
+            kiosk_obj = db.query(Kiosk).filter(Kiosk.code == kiosk_id).first()
+            
+        kiosk_db_id = kiosk_obj.id if kiosk_obj else "T3-L1-K04"
+        
+        duration_str = body.get("duration", "00:00")
+        call_duration_seconds = 0
+        if ":" in duration_str:
+            parts = duration_str.split(":")
+            if len(parts) == 2:
+                call_duration_seconds = int(parts[0]) * 60 + int(parts[1])
+            elif len(parts) == 3:
+                call_duration_seconds = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+                
+        categories = body.get("categories", [])
+        categories_str = ", ".join(categories) if categories else None
+        
+        support_call = SupportCall(
+            id=session_id if session_id and not ("demo" in session_id or "test" in session_id) else None,
+            kiosk_id=kiosk_db_id,
+            operator_id="op_101",  # Priya Sharma
+            status="ended",
+            call_duration_seconds=call_duration_seconds,
+            issue_category=categories_str,
+            operator_notes=body.get("notes", ""),
+            passenger_name=f"{body.get('firstName', '')} {body.get('lastName', '')}".strip() or "Passenger",
+            flight_number=body.get("flightNo", ""),
+            pnr="ABC123"
+        )
+        
+        db.add(support_call)
+        db.commit()
+        
+        res_data = {
+            "session": support_call.id,
+            "date": support_call.created_at.strftime("%d-%b-%y"),
+            "time": support_call.created_at.strftime("%I:%M %p"),
+            "kiosk": kiosk_id,
+            "passenger": support_call.passenger_name,
+            "duration": duration_str,
+            "notes": support_call.operator_notes,
+            "categories": categories,
+            "flightNo": support_call.flight_number
         }
-    })
+        logger.info(f"Saved support call to DB: {support_call.id}")
+        db.close()
+        return JSONResponse({"success": True, "message": "Log submitted successfully", "data": res_data})
+    except Exception as e:
+        logger.error(f"Error submitting operator log: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+async def get_operator_stats(request):
+    try:
+        from database import SessionLocal
+        from models import SupportCall
+        
+        db = SessionLocal()
+        calls = db.query(SupportCall).all()
+        total = len(calls)
+        
+        if total == 0:
+            db.close()
+            return JSONResponse({
+                "success": True,
+                "data": {
+                    "totalInboundCalls": 0,
+                    "avgCallTimeMinutes": "0.00",
+                    "resolutionRate": "100%",
+                    "activeOperators": 3
+                }
+            })
+            
+        total_seconds = sum(c.call_duration_seconds for c in calls)
+        avg_minutes = (total_seconds / 60) / total
+        
+        db.close()
+        return JSONResponse({
+            "success": True,
+            "data": {
+                "totalInboundCalls": total,
+                "avgCallTimeMinutes": f"{avg_minutes:.2f}",
+                "resolutionRate": "100%",
+                "activeOperators": 3
+            }
+        })
+    except Exception as e:
+        logger.error(f"Error fetching stats: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
 
 async def get_operator_logs(request):
-    logs = [
-        {"session": "89542", "date": "13-Aug-26", "time": "11:30", "kiosk": "T3-L1-K04", "passenger": "Luc Desmarais", "duration": "4m 12s", "status": "RESOLVED"},
-        {"session": "78405", "date": "13-Aug-26", "time": "10:45", "kiosk": "T2-A87", "passenger": "Ananya Sharma", "duration": "3m 05s", "status": "RESOLVED"},
-        {"session": "89545", "date": "13-Aug-26", "time": "09:20", "kiosk": "T2-A92", "passenger": "Rajesh Kumar", "duration": "2m 50s", "status": "RESOLVED"},
-        {"session": "597712", "date": "13-Aug-26", "time": "08:15", "kiosk": "T1-C04", "passenger": "Priya Patel", "duration": "5m 10s", "status": "RESOLVED"}
-    ]
-    return JSONResponse({"success": True, "data": logs})
+    try:
+        from database import SessionLocal
+        from models import SupportCall
+        
+        db = SessionLocal()
+        calls = db.query(SupportCall).order_by(SupportCall.created_at.desc()).all()
+        
+        logs = []
+        for c in calls:
+            kiosk_code = c.kiosk_id
+            if c.kiosk:
+                kiosk_code = c.kiosk.code
+                
+            minutes = c.call_duration_seconds // 60
+            seconds = c.call_duration_seconds % 60
+            duration_str = f"{minutes:02d}:{seconds:02d}"
+            
+            logs.append({
+                "session": c.id,
+                "date": c.created_at.strftime("%d-%b-%y"),
+                "time": c.created_at.strftime("%I:%M %p"),
+                "kiosk": kiosk_code,
+                "passenger": c.passenger_name or "Passenger",
+                "duration": duration_str,
+                "notes": c.operator_notes or "",
+                "status": "RESOLVED",
+                "categories": c.issue_category.split(", ") if c.issue_category else [],
+                "flightNo": c.flight_number or ""
+            })
+            
+        db.close()
+        return JSONResponse({"success": True, "data": logs})
+    except Exception as e:
+        logger.error(f"Error fetching logs: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
 
 async def submit_feedback(request):
-    return JSONResponse({"success": True, "message": "Feedback submitted successfully"})
+    try:
+        body = await request.json()
+        ratings = body.get("ratings", {})
+        comments = body.get("comments", "")
+        
+        from database import SessionLocal
+        from models import FeedbackSubmission
+        
+        db = SessionLocal()
+        
+        cleanliness = ratings.get("cleanliness", 5)
+        staff = ratings.get("staff", 5)
+        wayfinding = ratings.get("navigation", 5)
+        wifi = ratings.get("facilities", 5)
+        food = ratings.get("facilities", 5)
+        overall = ratings.get("overall", 5)
+        
+        feedback = FeedbackSubmission(
+            cleanliness_rating=cleanliness,
+            staff_rating=staff,
+            wayfinding_rating=wayfinding,
+            wifi_rating=wifi,
+            food_rating=food,
+            overall_rating=overall,
+            comments=comments,
+            kiosk_id="T3-L1-K04"
+        )
+        
+        db.add(feedback)
+        db.commit()
+        logger.info(f"Feedback saved successfully: {feedback.id}")
+        db.close()
+        return JSONResponse({"success": True, "message": "Feedback submitted successfully"})
+    except Exception as e:
+        logger.error(f"Error saving feedback: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
 
 async def request_wifi_otp(request):
     return JSONResponse({"success": True, "message": "OTP sent to phone", "otp": "123456"})
@@ -247,6 +441,8 @@ routes = [
     Route("/api/v1/operator/queue", get_operator_queue),
     Route("/api/v1/operator/stats", get_operator_stats),
     Route("/api/v1/operator/logs", get_operator_logs),
+    Route("/api/v1/operator/call/{call_id}", get_call_details),
+    Route("/api/v1/operator/logs/submit", submit_operator_log, methods=["POST"]),
     Route("/api/v1/feedback/submit", submit_feedback, methods=["POST"]),
     Route("/api/v1/wifi/request-otp", request_wifi_otp, methods=["POST"]),
     Route("/api/v1/wifi/verify-otp", verify_wifi_otp, methods=["POST"]),
