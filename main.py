@@ -170,6 +170,26 @@ async def get_operator_queue(request):
     from services.webrtc_signaling import call_queue
     return JSONResponse({"success": True, "totalQueued": len(call_queue), "queue": call_queue})
 
+async def get_operator_stats(request):
+    return JSONResponse({
+        "success": True,
+        "data": {
+            "totalInboundCalls": 24,
+            "avgCallTimeMinutes": "3.45",
+            "resolutionRate": "95%",
+            "activeOperators": 3
+        }
+    })
+
+async def get_operator_logs(request):
+    logs = [
+        {"session": "89542", "date": "13-Aug-26", "time": "11:30", "kiosk": "T3-L1-K04", "passenger": "Luc Desmarais", "duration": "4m 12s", "status": "RESOLVED"},
+        {"session": "78405", "date": "13-Aug-26", "time": "10:45", "kiosk": "T2-A87", "passenger": "Ananya Sharma", "duration": "3m 05s", "status": "RESOLVED"},
+        {"session": "89545", "date": "13-Aug-26", "time": "09:20", "kiosk": "T2-A92", "passenger": "Rajesh Kumar", "duration": "2m 50s", "status": "RESOLVED"},
+        {"session": "597712", "date": "13-Aug-26", "time": "08:15", "kiosk": "T1-C04", "passenger": "Priya Patel", "duration": "5m 10s", "status": "RESOLVED"}
+    ]
+    return JSONResponse({"success": True, "data": logs})
+
 async def submit_feedback(request):
     return JSONResponse({"success": True, "message": "Feedback submitted successfully"})
 
@@ -178,6 +198,42 @@ async def request_wifi_otp(request):
 
 async def verify_wifi_otp(request):
     return JSONResponse({"success": True, "voucher": "WIFI-AIRPORT-8891", "expiresInMinutes": 45})
+
+
+async def get_baggage_belts(request):
+    belts = [
+        {"id": "belt_4", "carousel": "Carousel 4", "flightNumber": "6E 203", "airline": "IndiGo", "origin": "Chennai (MAA)", "status": "DELIVERING", "location": "Terminal 2 · Arrival Hall Level 1"},
+        {"id": "belt_9", "carousel": "Carousel 9", "flightNumber": "AI 101", "airline": "Air India", "origin": "London (LHR)", "status": "FIRST_BAG", "location": "Terminal 3 · International Arrival"},
+        {"id": "belt_2", "carousel": "Carousel 2", "flightNumber": "SG 812", "airline": "SpiceJet", "origin": "Mumbai (BOM)", "status": "DELAYED", "location": "Terminal 1 · Domestic Arrival"}
+    ]
+    return JSONResponse({"success": True, "data": belts})
+
+async def get_directory_pois(request):
+    category = request.query_params.get("category", "")
+    pois = [
+        {"id": "poi_third_wave", "name": "Third Wave Coffee", "category": "eat-dine", "sub": "Café & Artisanal Coffee", "floor": "L1", "terminal": "T3", "gate": "Near Gate B10"},
+        {"id": "poi_starbucks", "name": "Starbucks Coffee", "category": "eat-dine", "sub": "Beverages & Pastries", "floor": "L2", "terminal": "T3", "gate": "Food Court"},
+        {"id": "poi_duty_free", "name": "Delhi Duty Free", "category": "shopping", "sub": "Perfumes, Cosmetics & Liquor", "floor": "L1", "terminal": "T3", "gate": "Central Atrium"},
+        {"id": "poi_relay", "name": "Relay Travel Store", "category": "shopping", "sub": "Books, Snacks & Electronics", "floor": "L1", "terminal": "T2", "gate": "Gate B12"},
+        {"id": "poi_plaza_premium", "name": "Encalm Premium Lounge", "category": "lounge", "sub": "24/7 Buffet, Shower & Wifi", "floor": "L2", "terminal": "T3", "gate": "Mezzanine Level"},
+        {"id": "poi_medical", "name": "Apollo Medical Centre", "category": "medical", "sub": "24/7 Doctor & Pharmacy", "floor": "L1", "terminal": "T3", "gate": "Near Elevator B"}
+    ]
+    if category:
+        pois = [p for p in pois if p["category"] == category or category in p["sub"].lower()]
+    return JSONResponse({"success": True, "data": pois})
+
+async def get_shuttle_schedules(request):
+    shuttles = [
+        {"id": "shuttle_1", "route": "Terminal 3 ↔ Terminal 1", "frequencyMinutes": 10, "nextDeparture": "4 mins", "location": "Gate 4, Arrival Level"},
+        {"id": "shuttle_2", "route": "Terminal 3 ↔ Terminal 2", "frequencyMinutes": 5, "nextDeparture": "2 mins", "location": "Gate 2, Arrival Level"},
+        {"id": "shuttle_3", "route": "Express Metro Transit", "frequencyMinutes": 12, "nextDeparture": "6 mins", "location": "Airport Metro Station"}
+    ]
+    return JSONResponse({"success": True, "data": shuttles})
+
+async def kiosk_heartbeat(request):
+    body = await request.json() if request.method == "POST" else {}
+    kiosk_id = body.get("kioskId", "T3-L1-K04")
+    return JSONResponse({"success": True, "status": "acknowledged", "kioskId": kiosk_id})
 
 
 routes = [
@@ -189,9 +245,15 @@ routes = [
     Route("/api/v1/wayfinding/pois", list_pois),
     Route("/api/v1/ai/intent", process_ai_intent, methods=["POST"]),
     Route("/api/v1/operator/queue", get_operator_queue),
+    Route("/api/v1/operator/stats", get_operator_stats),
+    Route("/api/v1/operator/logs", get_operator_logs),
     Route("/api/v1/feedback/submit", submit_feedback, methods=["POST"]),
     Route("/api/v1/wifi/request-otp", request_wifi_otp, methods=["POST"]),
     Route("/api/v1/wifi/verify-otp", verify_wifi_otp, methods=["POST"]),
+    Route("/api/v1/baggage/belts", get_baggage_belts),
+    Route("/api/v1/directory", get_directory_pois),
+    Route("/api/v1/transfer/shuttles", get_shuttle_schedules),
+    Route("/api/v1/kiosk/heartbeat", kiosk_heartbeat, methods=["POST"]),
 ]
 
 middleware = [
