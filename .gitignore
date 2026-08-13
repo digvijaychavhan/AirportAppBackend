@@ -5,3 +5,4 @@ app.db
 .env
 .venv/
 venv/
+env/
