@@ -430,6 +430,9 @@ async def kiosk_heartbeat(request):
     return JSONResponse({"success": True, "status": "acknowledged", "kioskId": kiosk_id})
 
 
+from starlette.routing import Route, Mount
+from routes.map_editor import routes as map_editor_routes
+
 routes = [
     Route("/", health_check),
     Route("/health", health_check),
@@ -450,6 +453,7 @@ routes = [
     Route("/api/v1/directory", get_directory_pois),
     Route("/api/v1/transfer/shuttles", get_shuttle_schedules),
     Route("/api/v1/kiosk/heartbeat", kiosk_heartbeat, methods=["POST"]),
+    Mount("", routes=map_editor_routes),
 ]
 
 middleware = [
