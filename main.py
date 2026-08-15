@@ -3,10 +3,14 @@ Main Python ASGI Server Application
 Built on Starlette & Socket.IO for maximum execution speed and zero build bottlenecks
 """
 
+import os
 import json
 import logging
 from datetime import datetime
 import random
+from dotenv import load_dotenv
+
+load_dotenv()
 from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Route
@@ -396,6 +400,67 @@ async def request_wifi_otp(request):
 async def verify_wifi_otp(request):
     return JSONResponse({"success": True, "voucher": "WIFI-AIRPORT-8891", "expiresInMinutes": 45})
 
+async def scan_passport_for_wifi(request):
+    try:
+        body = await request.json() if request.method == "POST" else {}
+        image_base64 = body.get("imageBase64") or body.get("image_base64")
+        raw_mrz = body.get("rawMrz") or body.get("raw_mrz")
+        is_demo = body.get("isDemo") or body.get("is_demo") or False
+        demo_type = body.get("demoType") or body.get("demo_type") or "valid"
+
+        from services.passport_verifier import verify_passport_image, generate_wifi_qr_payload
+
+        is_valid, passport_data, error_reason = await verify_passport_image(
+            image_base64=image_base64,
+            raw_mrz=raw_mrz,
+            is_demo=is_demo,
+            demo_type=demo_type
+        )
+
+        if not is_valid or not passport_data:
+            return JSONResponse({
+                "success": False,
+                "verified": False,
+                "message": "Passport verification failed.",
+                "errorCode": "INVALID_PASSPORT",
+                "details": error_reason or "The scanned document is not an official passport biographical photo page.",
+                "extracted_raw_text": passport_data.get("extracted_raw_text") if passport_data else raw_mrz,
+                "parsed_line1": passport_data.get("parsed_line1") if passport_data else None,
+                "parsed_line2": passport_data.get("parsed_line2") if passport_data else None,
+                "checksum_status": passport_data.get("checksum_status") if passport_data else None,
+                "diagnostics": passport_data.get("diagnostics") if passport_data else None
+            }, status_code=400)
+
+        passenger_name = passport_data.get("passenger_name", "INTERNATIONAL TRAVELER")
+        passport_num = passport_data.get("passport_number", "P1234567")
+        wifi_data = generate_wifi_qr_payload(
+            passenger_name=passenger_name,
+            passport_number=passport_num,
+            ssid="GMR Free Wi-Fi",
+            duration_minutes=45
+        )
+
+        return JSONResponse({
+            "success": True,
+            "verified": True,
+            "message": "Passport successfully verified! Scan the QR code below on your mobile phone to connect.",
+            "passportDetails": passport_data,
+            "wifiDetails": wifi_data,
+            "extracted_raw_text": passport_data.get("extracted_raw_text") or raw_mrz,
+            "parsed_line1": passport_data.get("parsed_line1"),
+            "parsed_line2": passport_data.get("parsed_line2"),
+            "checksum_status": passport_data.get("checksum_status"),
+            "diagnostics": passport_data.get("diagnostics")
+        })
+    except Exception as e:
+        logger.error(f"Error in scan_passport_for_wifi: {e}")
+        return JSONResponse({
+            "success": False,
+            "verified": False,
+            "message": "Failed to process passport scan.",
+            "details": str(e)
+        }, status_code=500)
+
 
 async def get_baggage_belts(request):
     belts = [
@@ -477,6 +542,7 @@ routes = [
     Route("/api/v1/feedback/submit", submit_feedback, methods=["POST"]),
     Route("/api/v1/wifi/request-otp", request_wifi_otp, methods=["POST"]),
     Route("/api/v1/wifi/verify-otp", verify_wifi_otp, methods=["POST"]),
+    Route("/api/v1/wifi/scan-passport", scan_passport_for_wifi, methods=["POST"]),
     Route("/api/v1/baggage/belts", get_baggage_belts),
     Route("/api/v1/directory", get_directory_pois),
     Route("/api/v1/transfer/shuttles", get_shuttle_schedules),
