@@ -170,7 +170,10 @@ async def process_ai_intent(request):
 
 async def get_operator_queue(request):
     from services.webrtc_signaling import call_queue
-    return JSONResponse({"success": True, "totalQueued": len(call_queue), "queue": call_queue})
+    return JSONResponse(
+        {"success": True, "totalQueued": len(call_queue), "queue": call_queue},
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"}
+    )
 
 async def get_call_details(request):
     call_id = request.path_params.get("call_id")

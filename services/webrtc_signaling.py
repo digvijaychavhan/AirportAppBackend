@@ -41,8 +41,15 @@ async def disconnect(sid: str):
     client_info = connected_clients.pop(sid, None)
     if client_info:
         client_id = client_info.get("clientId")
-        # Remove any pending queued calls for this client
-        call_queue = [c for c in call_queue if c.get("kioskSid") != sid and c.get("kioskId") != client_id]
+        # Remove any pending queued calls for this client and notify operators immediately
+        removed_calls = [c for c in call_queue if c.get("kioskSid") == sid or (client_id and c.get("kioskId") == client_id)]
+        call_queue = [c for c in call_queue if c not in removed_calls]
+        for c in removed_calls:
+            cid = c.get("callId")
+            if cid in active_calls:
+                active_calls.pop(cid, None)
+            logger.info(f"Queued call cancelled due to socket disconnect: {cid}")
+            await sio.emit("SUPPORT_CALL_CANCELLED", {"callId": cid, "kioskId": c.get("kioskId")}, room="operators")
         
         # Clean up active calls if client was in an active call
         call_id = client_info.get("active_call_id")
@@ -55,6 +62,35 @@ async def disconnect(sid: str):
                 room=f"call_{call_id}"
             )
             active_calls.pop(call_id, None)
+
+
+@sio.event
+async def CANCEL_CALL_REQUEST(sid: str, data: Dict[str, Any]):
+    """
+    Kiosk cancels its pending call request before an operator answers.
+    data = { "callId": "call_12345678", "kioskId": "T3-L1-K04" }
+    """
+    global call_queue
+    call_id = data.get("callId")
+    kiosk_id = data.get("kioskId")
+
+    removed_calls = []
+    new_queue = []
+    for c in call_queue:
+        if (call_id and c.get("callId") == call_id) or (kiosk_id and c.get("kioskId") == kiosk_id) or c.get("kioskSid") == sid:
+            removed_calls.append(c)
+        else:
+            new_queue.append(c)
+    call_queue = new_queue
+
+    for c in removed_calls:
+        cid = c.get("callId")
+        if cid in active_calls:
+            active_calls.pop(cid, None)
+        logger.info(f"Queued call cancelled by kiosk: {cid}")
+        await sio.emit("SUPPORT_CALL_CANCELLED", {"callId": cid, "kioskId": c.get("kioskId")}, room="operators")
+
+    await sio.emit("CALL_CANCELLED_ACK", {"status": "CANCELLED"}, room=sid)
 
 
 @sio.event
