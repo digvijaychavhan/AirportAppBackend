@@ -26,6 +26,63 @@ active_calls: Dict[str, Dict[str, Any]] = {}
 connected_clients: Dict[str, Dict[str, Any]] = {}
 # Waiting queue list of call_ids
 call_queue: List[Dict[str, Any]] = []
+# Operator availability pool: operator_id -> { operatorId, sid, name, status: 'AVAILABLE'|'BUSY'|'OFFLINE', availableSince: float, currentCallId: str }
+online_operators: Dict[str, Dict[str, Any]] = {}
+
+
+def get_longest_idle_available_operator(exclude_op_id: str = None) -> Any:
+    """
+    Returns the operator who is currently AVAILABLE and has been idle/free
+    for the longest duration (earliest availableSince timestamp).
+    """
+    available_ops = [
+        op for op in online_operators.values()
+        if op.get("status") == "AVAILABLE" and op.get("sid") and op.get("operatorId") != exclude_op_id
+    ]
+    if not available_ops:
+        return None
+    # Sort ascending by availableSince (oldest idle timestamp first)
+    available_ops.sort(key=lambda x: x.get("availableSince", 0))
+    return available_ops[0]
+
+
+async def dispatch_call_to_operator(call_data: Dict[str, Any], target_op: Dict[str, Any]):
+    """
+    Emits incoming call ringing event to the allocated operator.
+    """
+    call_id = call_data["callId"]
+    ring_start = call_data.get("ringStartTime") or datetime.utcnow().isoformat()
+    call_data["ringStartTime"] = ring_start
+    call_data["allocatedOperatorId"] = target_op["operatorId"]
+
+    payload = {
+        "callId": call_id,
+        "kioskId": call_data.get("kioskId"),
+        "passengerName": call_data.get("passengerName", "Luc Desmarais"),
+        "flightNumber": call_data.get("flightNumber", "6E 203"),
+        "pnr": call_data.get("pnr", "ABC123"),
+        "ringStartTime": ring_start,
+        "allocatedTo": target_op["operatorId"],
+        "adaPriority": call_data.get("adaPriority", False)
+    }
+
+    logger.info(f"Allocating call {call_id} to longest-idle operator {target_op['operatorId']} (SID: {target_op['sid']})")
+    if target_op.get("sid"):
+        await sio.emit("INCOMING_CALL_RINGING", payload, room=target_op["sid"])
+    # Broadcast to room 'operators' so all operator tabs/views receive the ringing popup
+    await sio.emit("INCOMING_CALL_RINGING", payload, room="operators")
+
+
+async def check_and_dispatch_queued_calls():
+    """
+    Checks for waiting calls in queue and dispatches to available idle operators.
+    """
+    for call in call_queue:
+        if call.get("status") == "QUEUED" and not call.get("allocatedOperatorId"):
+            idle_op = get_longest_idle_available_operator()
+            if idle_op:
+                await dispatch_call_to_operator(call, idle_op)
+                break
 
 
 @sio.event
@@ -41,6 +98,15 @@ async def disconnect(sid: str):
     client_info = connected_clients.pop(sid, None)
     if client_info:
         client_id = client_info.get("clientId")
+        role = client_info.get("role")
+
+        # If operator disconnected, update operator pool
+        if role == "operator" and client_id in online_operators:
+            # Check if this socket was the active one
+            if online_operators[client_id].get("sid") == sid:
+                online_operators[client_id]["status"] = "OFFLINE"
+                logger.info(f"Operator {client_id} marked OFFLINE due to socket disconnect")
+
         # Remove any pending queued calls for this client and notify operators immediately
         removed_calls = [c for c in call_queue if c.get("kioskSid") == sid or (client_id and c.get("kioskId") == client_id)]
         call_queue = [c for c in call_queue if c not in removed_calls]
@@ -50,6 +116,7 @@ async def disconnect(sid: str):
                 active_calls.pop(cid, None)
             logger.info(f"Queued call cancelled due to socket disconnect: {cid}")
             await sio.emit("SUPPORT_CALL_CANCELLED", {"callId": cid, "kioskId": c.get("kioskId")}, room="operators")
+            await sio.emit("INCOMING_CALL_DISMISSED", {"callId": cid}, room="operators")
         
         # Clean up active calls if client was in an active call
         call_id = client_info.get("active_call_id")
@@ -61,6 +128,12 @@ async def disconnect(sid: str):
                 {"callId": call_id, "reason": "PEER_DISCONNECTED"},
                 room=f"call_{call_id}"
             )
+            # If an operator was in this call, make them available again
+            op_id = call_session.get("operatorId")
+            if op_id and op_id in online_operators:
+                online_operators[op_id]["status"] = "AVAILABLE"
+                online_operators[op_id]["availableSince"] = datetime.utcnow().timestamp()
+                online_operators[op_id]["currentCallId"] = None
             active_calls.pop(call_id, None)
 
 
@@ -89,6 +162,7 @@ async def CANCEL_CALL_REQUEST(sid: str, data: Dict[str, Any]):
             active_calls.pop(cid, None)
         logger.info(f"Queued call cancelled by kiosk: {cid}")
         await sio.emit("SUPPORT_CALL_CANCELLED", {"callId": cid, "kioskId": c.get("kioskId")}, room="operators")
+        await sio.emit("INCOMING_CALL_DISMISSED", {"callId": cid}, room="operators")
 
     await sio.emit("CALL_CANCELLED_ACK", {"status": "CANCELLED"}, room=sid)
 
@@ -97,12 +171,12 @@ async def CANCEL_CALL_REQUEST(sid: str, data: Dict[str, Any]):
 async def REGISTER_CLIENT(sid: str, data: Dict[str, Any]):
     """
     Registers client as either 'kiosk' or 'operator'.
-    data = { "role": "kiosk" | "operator", "clientId": "T3-L1-K04" | "op_101" }
+    data = { "role": "kiosk" | "operator", "clientId": "T3-L1-K04" | "op_101", "status": "AVAILABLE" | "OFFLINE" }
     """
     role = data.get("role", "kiosk")
     client_id = data.get("clientId", sid)
-    # Preserve active_call_id if client is re-registering (e.g. after page navigation)
     existing_call_id = connected_clients.get(sid, {}).get("active_call_id")
+
     connected_clients[sid] = {
         "sid": sid,
         "role": role,
@@ -112,9 +186,52 @@ async def REGISTER_CLIENT(sid: str, data: Dict[str, Any]):
 
     if role == "operator":
         await sio.enter_room(sid, "operators")
-        logger.info(f"Operator {client_id} joined operators room")
+        status = data.get("status", "AVAILABLE")
+        name = data.get("name", "Priya Sharma (Agent #101)")
+
+        if client_id in online_operators:
+            online_operators[client_id]["sid"] = sid
+            if status != "PRESERVE":
+                online_operators[client_id]["status"] = status
+        else:
+            online_operators[client_id] = {
+                "operatorId": client_id,
+                "sid": sid,
+                "name": name,
+                "status": status,
+                "availableSince": datetime.utcnow().timestamp(),
+                "currentCallId": None
+            }
+
+        logger.info(f"Operator {client_id} registered (Status: {online_operators[client_id]['status']})")
+        await sio.emit("OPERATOR_STATE_SYNC", online_operators[client_id], room=sid)
+        # Check if there are pending queued calls waiting for an operator
+        await check_and_dispatch_queued_calls()
 
     await sio.emit("REGISTERED_ACK", {"status": "REGISTERED", "role": role, "clientId": client_id}, room=sid)
+
+
+@sio.event
+async def OPERATOR_STATUS_UPDATE(sid: str, data: Dict[str, Any]):
+    """
+    Operator toggles Online/Offline status.
+    data = { "operatorId": "op_101", "status": "AVAILABLE" | "OFFLINE" }
+    """
+    op_id = data.get("operatorId", "op_101")
+    status = data.get("status", "AVAILABLE")
+
+    if op_id in online_operators:
+        online_operators[op_id]["status"] = status
+        online_operators[op_id]["sid"] = sid
+        if status == "AVAILABLE":
+            online_operators[op_id]["availableSince"] = datetime.utcnow().timestamp()
+            logger.info(f"Operator {op_id} is now ONLINE & AVAILABLE (Longest idle timer reset)")
+            # Check if any waiting call can be allocated immediately
+            await check_and_dispatch_queued_calls()
+        else:
+            logger.info(f"Operator {op_id} is now OFFLINE (No calls will be dispatched)")
+
+        await sio.emit("OPERATOR_STATE_SYNC", online_operators[op_id], room=sid)
 
 
 @sio.event
@@ -133,6 +250,7 @@ async def CALL_REQUEST(sid: str, data: Dict[str, Any]):
     passenger_name = data.get("passengerName", "Luc Desmarais")
     flight_number = data.get("flightNumber", "6E 203")
     pnr = data.get("pnr", "ABC123")
+    ring_start_time = datetime.utcnow().isoformat()
 
     # Remove any existing pending queued call for this kioskId to prevent duplicates
     call_queue = [c for c in call_queue if c.get("kioskId") != kiosk_id]
@@ -143,13 +261,15 @@ async def CALL_REQUEST(sid: str, data: Dict[str, Any]):
         "kioskSid": sid,
         "operatorId": None,
         "operatorSid": None,
+        "allocatedOperatorId": None,
         "adaPriority": ada_priority,
         "language": language,
         "status": "QUEUED",
         "passengerName": passenger_name,
         "flightNumber": flight_number,
         "pnr": pnr,
-        "enqueueTime": datetime.utcnow().isoformat()
+        "enqueueTime": ring_start_time,
+        "ringStartTime": ring_start_time
     }
 
     active_calls[call_id] = call_data
@@ -162,19 +282,61 @@ async def CALL_REQUEST(sid: str, data: Dict[str, Any]):
     else:
         call_queue.append(call_data)
 
-    logger.info(f"New call request enqueued: {call_id} from {kiosk_id}")
+    logger.info(f"New call request enqueued: {call_id} from {kiosk_id} ({passenger_name})")
 
-    # Notify kiosk that call is enqueued
-    await sio.emit("CALL_ENQUEUED_ACK", {"callId": call_id, "queuePosition": len(call_queue)}, room=sid)
+    # Notify kiosk that call is enqueued (kiosk starts ringing)
+    await sio.emit("CALL_ENQUEUED_ACK", {"callId": call_id, "queuePosition": len(call_queue), "ringStartTime": ring_start_time}, room=sid)
 
-    # Broadcast new queued call to all operators
+    # Broadcast new queued call to all operators for dashboard counter
     await sio.emit("SUPPORT_CALL_ENQUEUED", call_data, room="operators")
+
+    # Allocate to longest-idle available operator
+    idle_op = get_longest_idle_available_operator()
+    if idle_op:
+        await dispatch_call_to_operator(call_data, idle_op)
+    else:
+        logger.info(f"Broadcasting incoming call {call_id} to room 'operators' as fallback")
+        fallback_payload = {
+            "callId": call_id,
+            "kioskId": kiosk_id,
+            "passengerName": passenger_name,
+            "flightNumber": flight_number,
+            "pnr": pnr,
+            "ringStartTime": ring_start_time,
+            "allocatedTo": "op_101",
+            "adaPriority": ada_priority
+        }
+        await sio.emit("INCOMING_CALL_RINGING", fallback_payload, room="operators")
+
+
+@sio.event
+async def OPERATOR_DECLINE_CALL(sid: str, data: Dict[str, Any]):
+    """
+    Operator declines incoming call popup. Re-allocates call to the next longest-idle operator.
+    data = { "callId": "call_12345678", "operatorId": "op_101" }
+    """
+    call_id = data.get("callId")
+    operator_id = data.get("operatorId")
+    logger.info(f"Operator {operator_id} declined call {call_id}. Re-routing to next available operator.")
+
+    # Dismiss ringing on declining operator's screen
+    await sio.emit("INCOMING_CALL_DISMISSED", {"callId": call_id}, room=sid)
+
+    if call_id and call_id in active_calls:
+        call = active_calls[call_id]
+        if call.get("status") == "QUEUED":
+            next_op = get_longest_idle_available_operator(exclude_op_id=operator_id)
+            if next_op:
+                await dispatch_call_to_operator(call, next_op)
+            else:
+                call["allocatedOperatorId"] = None
+                logger.info(f"No other operator free to take call {call_id}. Waiting in queue.")
 
 
 @sio.event
 async def OPERATOR_ACCEPT_CALL(sid: str, data: Dict[str, Any]):
     """
-    Operator accepts an incoming queued call.
+    Operator accepts an incoming call.
     data = { "callId": "call_12345678", "operatorId": "op_101" }
     """
     global call_queue
@@ -196,6 +358,12 @@ async def OPERATOR_ACCEPT_CALL(sid: str, data: Dict[str, Any]):
     call_session["operatorSid"] = sid
     call_session["startTime"] = datetime.utcnow().isoformat()
 
+    # Mark operator as BUSY
+    if operator_id in online_operators:
+        online_operators[operator_id]["status"] = "BUSY"
+        online_operators[operator_id]["currentCallId"] = call_id
+        await sio.emit("OPERATOR_STATE_SYNC", online_operators[operator_id], room=sid)
+
     if sid in connected_clients:
         connected_clients[sid]["active_call_id"] = call_id
 
@@ -210,9 +378,12 @@ async def OPERATOR_ACCEPT_CALL(sid: str, data: Dict[str, Any]):
     if kiosk_sid:
         await sio.enter_room(kiosk_sid, room_name)
 
-    logger.info(f"Operator {operator_id} accepted call {call_id}. Room {room_name} created.")
+    logger.info(f"Operator {operator_id} accepted call {call_id}. Operator is now BUSY. Room {room_name} created.")
 
-    # Send acceptance signal to kiosk and operator
+    # Dismiss incoming ringing popups across all operators
+    await sio.emit("INCOMING_CALL_DISMISSED", {"callId": call_id}, room="operators")
+
+    # Send acceptance signal to kiosk and operator (stops ringtone and launches call)
     accept_payload = {
         "callId": call_id,
         "operatorId": operator_id,
@@ -221,6 +392,7 @@ async def OPERATOR_ACCEPT_CALL(sid: str, data: Dict[str, Any]):
     }
 
     await sio.emit("CALL_ACCEPTED", accept_payload, room=room_name)
+
 
 @sio.event
 async def JOIN_CALL_ROOM(sid: str, data: Dict[str, Any]):
@@ -299,8 +471,22 @@ async def END_CALL(sid: str, data: Dict[str, Any]):
 
     call_queue = [c for c in call_queue if c["callId"] != call_id]
 
+    op_id = None
     if call_id and call_id in active_calls:
-        active_calls.pop(call_id, None)
+        session = active_calls.pop(call_id, None)
+        if session:
+            op_id = session.get("operatorId")
+
+    # If operator was in this call and is still online, restore AVAILABLE status
+    if op_id and op_id in online_operators:
+        if online_operators[op_id].get("status") != "OFFLINE":
+            online_operators[op_id]["status"] = "AVAILABLE"
+            online_operators[op_id]["availableSince"] = datetime.utcnow().timestamp()
+            online_operators[op_id]["currentCallId"] = None
+            logger.info(f"Operator {op_id} is now free and AVAILABLE (added back to queue)")
+            await sio.emit("OPERATOR_STATE_SYNC", online_operators[op_id], room=online_operators[op_id].get("sid", ""))
+            # Check if another call is waiting in queue
+            await check_and_dispatch_queued_calls()
 
     logger.info(f"Call {call_id} ended: {reason}")
     await sio.emit("CALL_ENDED", {"callId": call_id, "reason": reason}, room=room_name)
