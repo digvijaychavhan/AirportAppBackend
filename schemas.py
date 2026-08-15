@@ -199,3 +199,51 @@ class WifiVerifyOTPResponse(BaseModel):
     voucher_code: str
     expires_at: datetime
     message: str
+
+
+# Wi-Fi Passport Scanning Schemas
+class WifiPassportScanRequest(BaseModel):
+    image_base64: Optional[str] = Field(None, description="Base64 encoded JPEG/PNG of the passport photo page")
+    raw_mrz: Optional[str] = Field(None, description="Optional raw 2-line MRZ string if scanned directly")
+    is_demo: bool = Field(False, description="Whether this is a demo simulation scan")
+    demo_type: str = Field("valid", description="'valid' | 'invalid' | 'driver_license' | 'selfie'")
+    kiosk_id: Optional[str] = Field("T3-L1-K04", description="Kiosk terminal identifier")
+
+
+class PassportDetails(BaseModel):
+    document_type: str
+    passenger_name: str
+    passport_number: str
+    issuing_country: str
+    nationality: Optional[str] = None
+    date_of_birth: Optional[str] = None
+    sex: Optional[str] = None
+    verification_method: Optional[str] = None
+
+
+class WifiAccessDetails(BaseModel):
+    ssid: str
+    voucher_code: str
+    wifi_password: str
+    wifi_qr_string: str
+    portal_connect_url: str
+    duration_minutes: int
+    expires_at: str
+    security_type: str
+
+
+class WifiPassportScanResponse(BaseModel):
+    success: bool
+    verified: bool
+    message: str
+    passport_details: Optional[PassportDetails] = None
+    wifi_details: Optional[WifiAccessDetails] = None
+    error_code: Optional[str] = None
+    details: Optional[str] = None
+    extracted_raw_text: Optional[str] = None
+    parsed_line1: Optional[str] = None
+    parsed_line2: Optional[str] = None
+    checksum_status: Optional[Dict[str, Any]] = None
+    diagnostics: Optional[List[str]] = None
+
+

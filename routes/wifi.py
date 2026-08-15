@@ -112,3 +112,94 @@ def verify_wifi_otp(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to complete Wi-Fi verification: {str(e)}"
         )
+
+
+@router.post("/scan-passport", response_model=schemas.WifiPassportScanResponse)
+async def scan_passport_for_wifi(
+    payload: schemas.WifiPassportScanRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Scans, verifies passport authenticity (MRZ & Vision AI), and returns Wi-Fi QR Code credentials.
+    Rejects non-passport documents.
+    """
+    from services.passport_verifier import verify_passport_image, generate_wifi_qr_payload
+
+    # Run verification pipeline
+    is_valid, passport_data, error_reason = await verify_passport_image(
+        image_base64=payload.image_base64,
+        raw_mrz=payload.raw_mrz,
+        is_demo=payload.is_demo,
+        demo_type=payload.demo_type
+    )
+
+    if not is_valid or not passport_data:
+        return schemas.WifiPassportScanResponse(
+            success=False,
+            verified=False,
+            message="Passport verification failed.",
+            error_code="INVALID_PASSPORT",
+            details=error_reason or "Scanned document is not a valid passport photo page.",
+            extracted_raw_text=passport_data.get("extracted_raw_text") if passport_data else payload.raw_mrz,
+            parsed_line1=passport_data.get("parsed_line1") if passport_data else None,
+            parsed_line2=passport_data.get("parsed_line2") if passport_data else None,
+            checksum_status=passport_data.get("checksum_status") if passport_data else None,
+            diagnostics=passport_data.get("diagnostics") if passport_data else None
+        )
+
+    # Generate Wi-Fi voucher & QR code credentials
+    passenger_name = passport_data.get("passenger_name", "INTERNATIONAL TRAVELER")
+    passport_num = passport_data.get("passport_number", "P1234567")
+    wifi_data = generate_wifi_qr_payload(
+        passenger_name=passenger_name,
+        passport_number=passport_num,
+        ssid="GMR Free Wi-Fi",
+        duration_minutes=45
+    )
+
+    # Persist session to database
+    try:
+        session_obj = models.WifiSession(
+            phone_number=f"PASS:{passport_num}",
+            otp_code="PASSPORT_VERIFIED",
+            is_verified=True,
+            voucher_code=wifi_data["voucher_code"],
+            expires_at=datetime.utcnow() + timedelta(minutes=45)
+        )
+        db.add(session_obj)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        # Session logging is best effort
+
+    return schemas.WifiPassportScanResponse(
+        success=True,
+        verified=True,
+        message="Passport successfully verified! Scan the QR code below on your mobile device to connect.",
+        passport_details=schemas.PassportDetails(
+            document_type=passport_data.get("document_type", "P (Passport)"),
+            passenger_name=passenger_name,
+            passport_number=passport_num,
+            issuing_country=passport_data.get("issuing_country", "IND"),
+            nationality=passport_data.get("nationality", "IND"),
+            date_of_birth=passport_data.get("date_of_birth"),
+            sex=passport_data.get("sex"),
+            verification_method=passport_data.get("verification_method")
+        ),
+        wifi_details=schemas.WifiAccessDetails(
+            ssid=wifi_data["ssid"],
+            voucher_code=wifi_data["voucher_code"],
+            wifi_password=wifi_data["wifi_password"],
+            wifi_qr_string=wifi_data["wifi_qr_string"],
+            portal_connect_url=wifi_data["portal_connect_url"],
+            duration_minutes=wifi_data["duration_minutes"],
+            expires_at=wifi_data["expires_at"],
+            security_type=wifi_data["security_type"]
+        ),
+        extracted_raw_text=passport_data.get("extracted_raw_text") or payload.raw_mrz,
+        parsed_line1=passport_data.get("parsed_line1"),
+        parsed_line2=passport_data.get("parsed_line2"),
+        checksum_status=passport_data.get("checksum_status"),
+        diagnostics=passport_data.get("diagnostics")
+    )
+
