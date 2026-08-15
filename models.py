@@ -110,9 +110,18 @@ class Poi(Base):
 
     id = Column(String, primary_key=True, default=generate_uuid)
     name = Column(String, nullable=False)
-    category = Column(String, nullable=False)  # Dining, Retail, Lounge, Restroom, Gate, etc.
-    node_id = Column(String, ForeignKey("map_nodes.id"), nullable=False)
-    floor_id = Column(String, ForeignKey("map_floors.id"), nullable=False)
+    category = Column(String, nullable=False)  # eat-dine, shopping, lounge, etc.
+    sub_category = Column(String, nullable=True) # cafe, fastfood, electronics, etc.
+    description = Column(String, nullable=True)
+    terminal = Column(String, nullable=True)
+    floor_name = Column(String, nullable=True)
+    gate = Column(String, nullable=True)
+    distance_m = Column(Integer, default=0)
+    badge_label = Column(String, nullable=True)
+    badge_variant = Column(String, nullable=True)
+    
+    node_id = Column(String, ForeignKey("map_nodes.id"), nullable=True)
+    floor_id = Column(String, ForeignKey("map_floors.id"), nullable=True)
     operating_hours = Column(String, default="24/7")
     dietary_tags = Column(String, nullable=True)
     rating = Column(Float, default=4.5)
@@ -197,3 +206,17 @@ class WifiSession(Base):
     voucher_code = Column(String, nullable=True)
     expires_at = Column(DateTime, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class WayfindingCategory(Base):
+    __tablename__ = "wayfinding_categories"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    title = Column(String, nullable=False)
+    description = Column(String, nullable=False)
+    photo_url = Column(String, nullable=True)
+    icon = Column(String, nullable=False, default="place")
+    icon_color = Column(String, nullable=False, default="#2563EB")  # Default to blue
+    icon_bg = Column(String, nullable=False, default="#DBEAFE")     # Default to light blue
+    route = Column(String, nullable=False)
+    is_active = Column(Boolean, default=True)

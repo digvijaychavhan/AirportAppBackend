@@ -403,18 +403,42 @@ async def get_baggage_belts(request):
     return JSONResponse({"success": True, "data": belts})
 
 async def get_directory_pois(request):
-    category = request.query_params.get("category", "")
-    pois = [
-        {"id": "poi_third_wave", "name": "Third Wave Coffee", "category": "eat-dine", "sub": "Café & Artisanal Coffee", "floor": "L1", "terminal": "T3", "gate": "Near Gate B10"},
-        {"id": "poi_starbucks", "name": "Starbucks Coffee", "category": "eat-dine", "sub": "Beverages & Pastries", "floor": "L2", "terminal": "T3", "gate": "Food Court"},
-        {"id": "poi_duty_free", "name": "Delhi Duty Free", "category": "shopping", "sub": "Perfumes, Cosmetics & Liquor", "floor": "L1", "terminal": "T3", "gate": "Central Atrium"},
-        {"id": "poi_relay", "name": "Relay Travel Store", "category": "shopping", "sub": "Books, Snacks & Electronics", "floor": "L1", "terminal": "T2", "gate": "Gate B12"},
-        {"id": "poi_plaza_premium", "name": "Encalm Premium Lounge", "category": "lounge", "sub": "24/7 Buffet, Shower & Wifi", "floor": "L2", "terminal": "T3", "gate": "Mezzanine Level"},
-        {"id": "poi_medical", "name": "Apollo Medical Centre", "category": "medical", "sub": "24/7 Doctor & Pharmacy", "floor": "L1", "terminal": "T3", "gate": "Near Elevator B"}
-    ]
-    if category:
-        pois = [p for p in pois if p["category"] == category or category in p["sub"].lower()]
-    return JSONResponse({"success": True, "data": pois})
+    try:
+        category = request.query_params.get("category", "")
+        from database import SessionLocal
+        from models import Poi
+        db = SessionLocal()
+        
+        query = db.query(Poi)
+        if category:
+            query = query.filter(Poi.category == category)
+            
+        pois = query.all()
+        
+        data = [{
+            "id": p.id,
+            "name": p.name,
+            "category": p.category,
+            "categoryLabel": p.sub_category or p.category,
+            "subCategory": p.sub_category or "",
+            "description": p.description or "",
+            "isOpen": True,
+            "hours": p.operating_hours or "24 Hours",
+            "terminal": p.terminal or "",
+            "floor": p.floor_name or "",
+            "gate": p.gate or "",
+            "distanceM": p.distance_m or 100,
+            "image": p.image_url or "",
+            "badge": p.badge_label or "",
+            "badgeVariant": p.badge_variant or "purple",
+            "filter": p.sub_category.split(",") if p.sub_category else []
+        } for p in pois]
+        
+        db.close()
+        return JSONResponse({"success": True, "data": data})
+    except Exception as e:
+        logger.error(f"Error fetching directory pois: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
 
 async def get_shuttle_schedules(request):
     shuttles = [
@@ -432,6 +456,7 @@ async def kiosk_heartbeat(request):
 
 from starlette.routing import Route, Mount
 from routes.map_editor import routes as map_editor_routes
+from routes.admin import routes as admin_routes
 
 routes = [
     Route("/", health_check),
@@ -453,8 +478,7 @@ routes = [
     Route("/api/v1/directory", get_directory_pois),
     Route("/api/v1/transfer/shuttles", get_shuttle_schedules),
     Route("/api/v1/kiosk/heartbeat", kiosk_heartbeat, methods=["POST"]),
-    Mount("", routes=map_editor_routes),
-]
+] + map_editor_routes + admin_routes
 
 middleware = [
     Middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
