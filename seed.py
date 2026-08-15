@@ -7,14 +7,23 @@ from datetime import datetime, timedelta
 from database import engine, Base, SessionLocal
 from models import Airline, Flight, Kiosk, MapFloor, MapNode, MapEdge, Poi, Operator, WayfindingCategory
 
-def seed_database():
-    print("Creating database tables...")
-    Base.metadata.drop_all(bind=engine)
+def seed_database(force: bool = False):
+    print("Ensuring database tables exist...")
+    if force:
+        print("Force option set: Dropping existing tables...")
+        Base.metadata.drop_all(bind=engine)
+    
     Base.metadata.create_all(bind=engine)
-
     db = SessionLocal()
 
     try:
+        if not force:
+            existing_airline = db.query(Airline).first()
+            existing_cat = db.query(WayfindingCategory).first()
+            if existing_airline and existing_cat:
+                print("Database already initialized and seeded. Skipping seed process.")
+                return
+
         print("Seeding Airlines...")
         airlines = [
             Airline(code="6E", name="IndiGo", logo_url="/logos/indigo.png", flight_type="DOMESTIC"),
@@ -162,14 +171,32 @@ def seed_database():
 
         print("Seeding POIs...")
         pois = [
-            Poi(id="poi-01", name="Delhi Chai Co & Bakery", category="Dining", node_id="node-l1-05", floor_id="floor-l1", operating_hours="24/7", dietary_tags="Vegetarian, Jain Options, Vegan", rating=4.8),
-            Poi(id="poi-02", name="Plaza Premium Lounge", category="Lounge", node_id="node-l2-02", floor_id="floor-l2", operating_hours="24/7", dietary_tags="Multi-Cuisine Buffet", rating=4.7),
-            Poi(id="poi-03", name="Duty Free World", category="Retail", node_id="node-l2-02", floor_id="floor-l2", operating_hours="24/7", rating=4.6),
-            Poi(id="poi-04", name="Gate 14 Boarding Area", category="Gate", node_id="node-l2-05", floor_id="floor-l2", operating_hours="24/7", rating=4.5),
-            Poi(id="poi-05", name="ADA Wheelchair Accessible Restroom", category="Restroom", node_id="node-l1-02", floor_id="floor-l1", operating_hours="24/7", rating=4.9),
-            Poi(id="poi-06", name="Baggage Reclaim Belt 04", category="Services", node_id="node-l1-04", floor_id="floor-l1", operating_hours="24/7", rating=4.2),
-            Poi(id="poi-07", name="Airport Information Desk", category="Information", node_id="node-l1-01", floor_id="floor-l1", operating_hours="24/7", rating=4.8),
-            Poi(id="poi-08", name="Starbucks Coffee", category="Dining", node_id="node-l2-01", floor_id="floor-l2", operating_hours="05:00 - 23:00", dietary_tags="Oat Milk, Gluten-Free Snacks", rating=4.5),
+            # Restaurants & Dining
+            Poi(id="r1", name="Third Wave Coffee", category="Dining", sub_category="cafe", description="Specialty coffee, pastries, sandwiches & more", terminal="T3 Departure", floor_name="Level 2", gate="Near Gate 24", node_id="node-l2-02", floor_id="floor-l2", operating_hours="6:00 AM – 11:00 PM", distance_m=120, image_url="/restaurants/third-wave-coffee.png", rating=4.8),
+            Poi(id="r2", name="McDonald's", category="Dining", sub_category="fastfood", description="Burgers, fries, beverages and more", terminal="T3 Departure", floor_name="Food Court", gate="", node_id="node-l1-05", floor_id="floor-l1", operating_hours="24 Hours", distance_m=150, image_url="/restaurants/mcdonalds.png", rating=4.6),
+            Poi(id="r3", name="Bikanervala", category="Dining", sub_category="indian", description="North Indian snacks, meals & sweets", terminal="T3 Departure", floor_name="", gate="Near Gate 19", node_id="node-l2-02", floor_id="floor-l2", operating_hours="6:00 AM – 11:00 PM", distance_m=180, image_url="/restaurants/bikanervala.png", rating=4.7),
+            Poi(id="r4", name="Subway", category="Dining", sub_category="fastfood", description="Sandwiches, salads & wraps", terminal="T3 Departure", floor_name="Food Court", gate="", node_id="node-l1-05", floor_id="floor-l1", operating_hours="6:00 AM – 12:00 AM", distance_m=210, image_url="/restaurants/subway.png", rating=4.4),
+            Poi(id="r5", name="Sichuan House", category="Dining", sub_category="asian", description="Chinese cuisine, noodles & rice", terminal="T3 Departure", floor_name="", gate="Near Gate 32", node_id="node-l2-05", floor_id="floor-l2", operating_hours="11:00 AM – 11:00 PM", distance_m=260, image_url="/restaurants/sichuan-house.png", rating=4.5),
+
+            # Lounges
+            Poi(id="l1", name="Encalm Lounge", category="Lounge", sub_category="t3,international,24hr,premium", description="Premium lounge offering gourmet dining, Wi-Fi, shower facilities and business workstations.", terminal="Terminal 3", gate="Near Gate 15", node_id="node-l2-02", floor_id="floor-l2", operating_hours="24 Hours", distance_m=120, image_url="/lounges/encalm-lounge.png", badge_label="Premium", badge_variant="purple", rating=4.9),
+            Poi(id="l2", name="Plaza Premium Lounge", category="Lounge", sub_category="t3,international,24hr,business", description="International lounge with buffet, shower rooms and dedicated business zone.", terminal="Terminal 3", gate="International Departures", node_id="node-l2-02", floor_id="floor-l2", operating_hours="24 Hours", distance_m=180, image_url="/lounges/plaza-premium.png", badge_label="International", badge_variant="teal", rating=4.7),
+            Poi(id="l3", name="Air India Maharaja Lounge", category="Lounge", sub_category="t3,international,24hr,business", description="Exclusive lounge for Air India Business and First Class passengers.", terminal="Terminal 3", gate="Near Gate 22", node_id="node-l2-02", floor_id="floor-l2", operating_hours="24 Hours", distance_m=210, image_url="/lounges/maharaja-lounge.png", badge_label="Business Class", badge_variant="amber", rating=4.8),
+            Poi(id="l4", name="Travel Club Lounge", category="Lounge", sub_category="t2,domestic", description="Comfortable lounge with refreshments, Wi-Fi and charging stations.", terminal="Terminal 2", gate="Near Security", node_id="node-l1-02", floor_id="floor-l1", operating_hours="05:00 AM – 11:00 PM", distance_m=260, image_url="/lounges/travel-club.png", badge_label="Domestic", badge_variant="green", rating=4.4),
+            Poi(id="l5", name="Premium Lounge", category="Lounge", sub_category="t1,premium,24hr", description="Quiet premium lounge offering complimentary meals and beverages.", terminal="Terminal 1", gate="Near Gate 5", node_id="node-l1-01", floor_id="floor-l1", operating_hours="24 Hours", distance_m=300, image_url="/lounges/premium-lounge.png", badge_label="VIP", badge_variant="red", rating=4.6),
+
+            # Stores & Retail
+            Poi(id="s1", name="Duty Free", category="Retail", sub_category="dutyfree", description="Luxury perfumes, cosmetics, chocolates, liquor and travel exclusives.", terminal="Terminal 3", gate="Near Gate 18", node_id="node-l2-02", floor_id="floor-l2", operating_hours="24 Hours", distance_m=110, image_url="/shopping/duty-free.png", rating=4.8),
+            Poi(id="s2", name="Imagine Store", category="Retail", sub_category="electronics", description="Apple products, accessories and premium electronics.", terminal="Terminal 3", gate="Near Gate 22", node_id="node-l2-02", floor_id="floor-l2", operating_hours="06:00 AM – 11:00 PM", distance_m=150, image_url="/shopping/imagine-store.png", rating=4.7),
+            Poi(id="s3", name="Hidesign", category="Retail", sub_category="fashion", description="Leather bags, wallets, backpacks and travel accessories.", terminal="Terminal 3", gate="Near Gate 30", node_id="node-l2-05", floor_id="floor-l2", operating_hours="08:00 AM – 10:00 PM", distance_m=190, image_url="/shopping/hidesign.png", rating=4.6),
+            Poi(id="s4", name="Relay Books", category="Retail", sub_category="books", description="Books, magazines, snacks and travel accessories.", terminal="Terminal 3", gate="Near Gate 11", node_id="node-l2-04", floor_id="floor-l2", operating_hours="05:00 AM – 11:00 PM", distance_m=220, image_url="/shopping/relay-books.png", rating=4.5),
+            Poi(id="s5", name="Travel Essentials", category="Retail", sub_category="convenience", description="Everything you need for your journey.", terminal="Terminal 3", gate="Near Security Exit", node_id="node-l1-02", floor_id="floor-l1", operating_hours="24 Hours", distance_m=250, image_url="/shopping/travel-essentials.png", rating=4.3),
+
+            # Gates, Restrooms, Services & Information
+            Poi(id="poi-04", name="Gate 14 Boarding Area", category="Gate", sub_category="gates", node_id="node-l2-05", floor_id="floor-l2", operating_hours="24/7", rating=4.5),
+            Poi(id="poi-05", name="ADA Wheelchair Accessible Restroom", category="Restroom", sub_category="restroom", node_id="node-l1-02", floor_id="floor-l1", operating_hours="24/7", rating=4.9),
+            Poi(id="poi-06", name="Baggage Reclaim Belt 04", category="Services", sub_category="services", node_id="node-l1-04", floor_id="floor-l1", operating_hours="24/7", rating=4.2),
+            Poi(id="poi-07", name="Airport Information Desk", category="Information", sub_category="info", node_id="node-l1-01", floor_id="floor-l1", operating_hours="24/7", rating=4.8),
         ]
         db.add_all(pois)
         db.commit()
@@ -268,4 +295,6 @@ def seed_database():
         db.close()
 
 if __name__ == "__main__":
-    seed_database()
+    import sys
+    force_seed = "--force" in sys.argv or "-f" in sys.argv
+    seed_database(force=force_seed)

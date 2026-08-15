@@ -404,14 +404,14 @@ async def get_baggage_belts(request):
 
 async def get_directory_pois(request):
     try:
-        category = request.query_params.get("category", "")
+        category = request.query_params.get("category", "").strip()
         from database import SessionLocal
         from models import Poi
         db = SessionLocal()
         
         query = db.query(Poi)
         if category:
-            query = query.filter(Poi.category == category)
+            query = query.filter(Poi.category.ilike(category))
             
         pois = query.all()
         
