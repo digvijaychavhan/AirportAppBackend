@@ -307,6 +307,19 @@ async def END_CALL(sid: str, data: Dict[str, Any]):
 
 
 @sio.event
+async def MEDIA_STATE_CHANGED(sid: str, data: Dict[str, Any]):
+    """
+    Relays media track states (mute / video off) between participants.
+    data = { "callId": "call_123", "role": "kiosk" | "operator", "isMuted": bool, "isVideoOff": bool }
+    """
+    call_id = data.get("callId")
+    if call_id:
+        room_name = f"call_{call_id}"
+        logger.info(f"Relaying MEDIA_STATE_CHANGED in room {room_name}: {data}")
+        await sio.emit("MEDIA_STATE_CHANGED", data, room=room_name, skip_sid=sid)
+
+
+@sio.event
 async def SCREEN_ANNOTATION_STROKE(sid: str, data: Dict[str, Any]):
     """
     Relays live screen drawing stroke events between Operator and Kiosk screen.
@@ -315,3 +328,4 @@ async def SCREEN_ANNOTATION_STROKE(sid: str, data: Dict[str, Any]):
     call_id = data.get("callId")
     room_name = f"call_{call_id}"
     await sio.emit("SCREEN_ANNOTATION_STROKE", data, room=room_name, skip_sid=sid)
+
