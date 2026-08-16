@@ -147,10 +147,14 @@ async def CANCEL_CALL_REQUEST(sid: str, data: Dict[str, Any]):
     call_id = data.get("callId")
     kiosk_id = data.get("kioskId")
 
+    if not call_id:
+        logger.info(f"Ignoring CANCEL_CALL_REQUEST without specific callId from sid {sid}")
+        return
+
     removed_calls = []
     new_queue = []
     for c in call_queue:
-        if (call_id and c.get("callId") == call_id) or (kiosk_id and c.get("kioskId") == kiosk_id) or c.get("kioskSid") == sid:
+        if c.get("callId") == call_id:
             removed_calls.append(c)
         else:
             new_queue.append(c)
