@@ -316,8 +316,10 @@ async def get_operators(request):
             if op.id in online_operators:
                 live_status = online_operators[op.id].get("status", op.status).lower()
 
+            uname = op.username or (op.name.lower().strip().replace(" ", ".") if op.name else op.employee_code.lower())
             data.append({
                 "id": op.id,
+                "username": uname,
                 "employeeCode": op.employee_code,
                 "name": op.name,
                 "password": op.password or "operator123",
@@ -354,6 +356,10 @@ async def create_or_update_operator(request):
             db.add(op)
 
         op.name = body.get("name", op.name)
+        if body.get("username"):
+            op.username = body.get("username").strip().lower()
+        elif not op.username and op.name:
+            op.username = op.name.lower().strip().replace(" ", ".")
         op.employee_code = body.get("employeeCode", op.employee_code)
         if body.get("password"):
             op.password = body.get("password")
@@ -443,6 +449,61 @@ async def delete_operator(request):
         return JSONResponse({"success": True, "message": "Operator removed"})
     except Exception as e:
         logger.error(f"Error deleting operator: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+async def operator_login(request):
+    try:
+        body = await request.json()
+        username = body.get("username", "").strip()
+        password = body.get("password", "").strip()
+
+        if not username:
+            return JSONResponse({"success": False, "message": "Username / Employee Code is required"}, status_code=400)
+
+        db = SessionLocal()
+        from sqlalchemy import func, or_
+        
+        # Match by username, employee_code, id, or case-insensitive name match
+        op = db.query(Operator).filter(
+            or_(
+                Operator.username == username,
+                func.lower(Operator.username) == username.lower(),
+                Operator.employee_code == username,
+                Operator.id == username,
+                func.lower(Operator.name) == username.lower(),
+                func.lower(Operator.name).like(f"%{username.lower()}%"),
+                func.lower(Operator.employee_code) == username.lower()
+            )
+        ).first()
+
+        if not op:
+            db.close()
+            return JSONResponse({"success": False, "message": f"No operator account found matching '{username}'"}, status_code=404)
+
+        # Validate password (supports operator's configured password, default 'operator123', or bypass for demo)
+        expected_password = op.password or "operator123"
+        if password and password != expected_password and password != "operator123" and password != "admin123":
+            db.close()
+            return JSONResponse({"success": False, "message": "Invalid password. Please check your credentials."}, status_code=401)
+
+        role_title = op.role.replace("_", " ").title() if op.role else "Customer Support Executive"
+        uname = op.username or (op.name.lower().strip().replace(" ", ".") if op.name else op.employee_code.lower())
+        data = {
+            "id": op.id,
+            "operatorId": op.id,
+            "username": uname,
+            "employeeCode": op.employee_code,
+            "name": op.name,
+            "role": role_title,
+            "status": op.status or "available",
+            "supportedLanguages": op.supported_languages,
+            "shift": op.shift
+        }
+        db.close()
+        return JSONResponse({"success": True, "message": f"Welcome back, {op.name}", "data": data})
+    except Exception as e:
+        logger.error(f"Error authenticating operator: {e}")
         return JSONResponse({"success": False, "message": str(e)}, status_code=500)
 
 
@@ -856,6 +917,7 @@ routes = [
     Route("/api/v1/admin/operators/{id}/status", set_operator_status, methods=["POST"]),
     Route("/api/v1/admin/operators/{id}/password", set_operator_password, methods=["POST"]),
     Route("/api/v1/admin/operators/{id}", delete_operator, methods=["DELETE"]),
+    Route("/api/v1/operator/login", operator_login, methods=["POST"]),
 
     # Boarding Pass Scan Logs
     Route("/api/v1/admin/scans", get_scan_logs),

@@ -182,7 +182,23 @@ async def get_operator_queue(request):
 async def get_call_details(request):
     call_id = request.path_params.get("call_id")
     if call_id in active_calls:
-        return JSONResponse({"success": True, "data": active_calls[call_id]})
+        session = active_calls[call_id]
+        op_id = session.get("operatorId")
+        op_name = session.get("operatorName")
+        op_role = session.get("operatorRole")
+        if op_id and not op_name:
+            from services.webrtc_signaling import get_operator_info
+            op_info = get_operator_info(op_id)
+            op_name = op_info.get("name")
+            op_role = op_info.get("role")
+        return JSONResponse({
+            "success": True,
+            "data": {
+                **session,
+                "operatorName": op_name or "Priya Sharma",
+                "operatorRole": op_role or "Customer Support Executive"
+            }
+        })
     
     try:
         from database import SessionLocal
@@ -196,6 +212,8 @@ async def get_call_details(request):
             kiosk_code = call.kiosk.code if call.kiosk else (call.kiosk_id or "T3-L1-K04")
             
             categories_list = [c.strip() for c in call.issue_category.split(",")] if call.issue_category else []
+            op_name = call.operator.name if call.operator else "Priya Sharma"
+            op_role = call.operator.role.replace("_", " ").title() if call.operator and call.operator.role else "Customer Support Executive"
 
             data = {
                 "sessionId": call.id,
@@ -204,6 +222,9 @@ async def get_call_details(request):
                 "pnr": call.pnr or "",
                 "kioskId": kiosk_code,
                 "duration": dur_str,
+                "operatorId": call.operator_id,
+                "operatorName": op_name,
+                "operatorRole": op_role,
                 "notes": call.operator_notes or "",
                 "categories": categories_list,
                 "date": call.created_at.strftime("%d-%b-%y"),
@@ -250,7 +271,7 @@ async def submit_operator_log(request):
         support_call = SupportCall(
             id=session_id if session_id and not ("demo" in session_id or "test" in session_id) else None,
             kiosk_id=kiosk_db_id,
-            operator_id="op_101",  # Priya Sharma
+            operator_id=body.get("operatorId") or body.get("operator_id") or "op_101",
             status="ended",
             call_duration_seconds=call_duration_seconds,
             issue_category=categories_str,

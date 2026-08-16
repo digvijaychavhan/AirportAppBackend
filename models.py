@@ -138,6 +138,7 @@ class Operator(Base):
     __tablename__ = "operators"
 
     id = Column(String, primary_key=True, default=generate_uuid)
+    username = Column(String, unique=True, index=True, nullable=True)
     employee_code = Column(String, unique=True, index=True, nullable=False)
     name = Column(String, nullable=False)
     password = Column(String, default="operator123")

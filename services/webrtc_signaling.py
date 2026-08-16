@@ -26,8 +26,33 @@ active_calls: Dict[str, Dict[str, Any]] = {}
 connected_clients: Dict[str, Dict[str, Any]] = {}
 # Waiting queue list of call_ids
 call_queue: List[Dict[str, Any]] = []
-# Operator availability pool: operator_id -> { operatorId, sid, name, status: 'AVAILABLE'|'BUSY'|'OFFLINE', availableSince: float, currentCallId: str }
+# Operator availability pool: operator_id -> { operatorId, sid, name, roleName, status: 'AVAILABLE'|'BUSY'|'OFFLINE', availableSince: float, currentCallId: str }
 online_operators: Dict[str, Dict[str, Any]] = {}
+
+
+def get_operator_info(operator_id: str) -> Dict[str, str]:
+    """
+    Resolves operator name and role from memory pool or sqlite database.
+    """
+    if operator_id in online_operators and online_operators[operator_id].get("name"):
+        return {
+            "name": online_operators[operator_id]["name"],
+            "role": online_operators[operator_id].get("roleName", "Customer Support Executive")
+        }
+    try:
+        from database import SessionLocal
+        from models import Operator
+        db = SessionLocal()
+        op = db.query(Operator).filter(Operator.id == operator_id).first()
+        if op:
+            role_title = op.role.replace("_", " ").title() if op.role else "Customer Support Executive"
+            info = {"name": op.name, "role": role_title}
+            db.close()
+            return info
+        db.close()
+    except Exception as e:
+        logger.error(f"Error getting operator info: {e}")
+    return {"name": "Priya Sharma", "role": "Customer Support Executive"}
 
 
 def get_longest_idle_available_operator(exclude_op_id: str = None) -> Any:
@@ -171,7 +196,7 @@ async def CANCEL_CALL_REQUEST(sid: str, data: Dict[str, Any]):
 async def REGISTER_CLIENT(sid: str, data: Dict[str, Any]):
     """
     Registers client as either 'kiosk' or 'operator'.
-    data = { "role": "kiosk" | "operator", "clientId": "T3-L1-K04" | "op_101", "status": "AVAILABLE" | "OFFLINE" }
+    data = { "role": "kiosk" | "operator", "clientId": "T3-L1-K04" | "op_101", "status": "AVAILABLE" | "OFFLINE", "name": str, "roleName": str }
     """
     role = data.get("role", "kiosk")
     client_id = data.get("clientId", sid)
@@ -187,10 +212,20 @@ async def REGISTER_CLIENT(sid: str, data: Dict[str, Any]):
     if role == "operator":
         await sio.enter_room(sid, "operators")
         status = data.get("status", "AVAILABLE")
-        name = data.get("name", "Priya Sharma (Agent #101)")
+        name = data.get("name")
+        role_name = data.get("roleName")
+
+        if not name or "Maya" in name:
+            op_db_info = get_operator_info(client_id)
+            name = op_db_info.get("name", "Priya Sharma")
+            role_name = op_db_info.get("role", "Customer Support Executive")
+        elif not role_name:
+            role_name = "Customer Support Executive"
 
         if client_id in online_operators:
             online_operators[client_id]["sid"] = sid
+            online_operators[client_id]["name"] = name
+            online_operators[client_id]["roleName"] = role_name
             if status != "PRESERVE":
                 online_operators[client_id]["status"] = status
         else:
@@ -198,12 +233,13 @@ async def REGISTER_CLIENT(sid: str, data: Dict[str, Any]):
                 "operatorId": client_id,
                 "sid": sid,
                 "name": name,
+                "roleName": role_name,
                 "status": status,
                 "availableSince": datetime.utcnow().timestamp(),
                 "currentCallId": None
             }
 
-        logger.info(f"Operator {client_id} registered (Status: {online_operators[client_id]['status']})")
+        logger.info(f"Operator {client_id} ({name}) registered (Status: {online_operators[client_id]['status']})")
         await sio.emit("OPERATOR_STATE_SYNC", online_operators[client_id], room=sid)
         # Check if there are pending queued calls waiting for an operator
         await check_and_dispatch_queued_calls()
@@ -341,7 +377,7 @@ async def OPERATOR_ACCEPT_CALL(sid: str, data: Dict[str, Any]):
     """
     global call_queue
     call_id = data.get("callId")
-    operator_id = data.get("operatorId", "op_default")
+    operator_id = data.get("operatorId", "op_101")
 
     if not call_id or call_id not in active_calls:
         await sio.emit("ERROR", {"message": "Call session not found or already accepted"}, room=sid)
@@ -352,9 +388,15 @@ async def OPERATOR_ACCEPT_CALL(sid: str, data: Dict[str, Any]):
         await sio.emit("ERROR", {"message": "Call is no longer in queue"}, room=sid)
         return
 
+    op_info = get_operator_info(operator_id)
+    op_name = op_info.get("name", "Priya Sharma")
+    op_role = op_info.get("role", "Customer Support Executive")
+
     # Update call session state
     call_session["status"] = "IN_PROGRESS"
     call_session["operatorId"] = operator_id
+    call_session["operatorName"] = op_name
+    call_session["operatorRole"] = op_role
     call_session["operatorSid"] = sid
     call_session["startTime"] = datetime.utcnow().isoformat()
 
@@ -370,7 +412,7 @@ async def OPERATOR_ACCEPT_CALL(sid: str, data: Dict[str, Any]):
     # Remove call from queue
     call_queue = [c for c in call_queue if c["callId"] != call_id]
 
-    kiosk_sid = call_session["kioskSid"]
+    kiosk_sid = call_session.get("kioskSid")
 
     # Put both kiosk and operator into a dedicated call room
     room_name = f"call_{call_id}"
@@ -378,7 +420,7 @@ async def OPERATOR_ACCEPT_CALL(sid: str, data: Dict[str, Any]):
     if kiosk_sid:
         await sio.enter_room(kiosk_sid, room_name)
 
-    logger.info(f"Operator {operator_id} accepted call {call_id}. Operator is now BUSY. Room {room_name} created.")
+    logger.info(f"Operator {operator_id} ({op_name}) accepted call {call_id}. Room {room_name} created.")
 
     # Dismiss incoming ringing popups across all operators
     await sio.emit("INCOMING_CALL_DISMISSED", {"callId": call_id}, room="operators")
@@ -387,7 +429,9 @@ async def OPERATOR_ACCEPT_CALL(sid: str, data: Dict[str, Any]):
     accept_payload = {
         "callId": call_id,
         "operatorId": operator_id,
-        "kioskId": call_session["kioskId"],
+        "operatorName": op_name,
+        "operatorRole": op_role,
+        "kioskId": call_session.get("kioskId", "T3-L1-K04"),
         "status": "ACCEPTED"
     }
 
@@ -408,6 +452,19 @@ async def JOIN_CALL_ROOM(sid: str, data: Dict[str, Any]):
         # Update the call session's kiosk sid if it's a kiosk reconnecting
         if role == "kiosk" and call_id in active_calls:
             active_calls[call_id]["kioskSid"] = sid
+            session = active_calls[call_id]
+            op_id = session.get("operatorId")
+            op_info = get_operator_info(op_id) if op_id else {}
+            op_name = session.get("operatorName") or op_info.get("name", "Priya Sharma")
+            op_role = session.get("operatorRole") or op_info.get("role", "Customer Support Executive")
+            await sio.emit("CALL_INFO", {
+                "callId": call_id,
+                "operatorId": op_id,
+                "operatorName": op_name,
+                "operatorRole": op_role,
+                "status": session.get("status", "IN_PROGRESS"),
+                "startTime": session.get("startTime")
+            }, room=sid)
         if sid in connected_clients:
             connected_clients[sid]["active_call_id"] = call_id
         logger.info(f"{role} {sid} joined call room {room_name}")
@@ -416,8 +473,21 @@ async def JOIN_CALL_ROOM(sid: str, data: Dict[str, Any]):
 @sio.event
 async def OPERATOR_READY(sid: str, data: Dict[str, Any]):
     call_id = data.get("callId")
+    operator_id = data.get("operatorId")
+    if not operator_id and call_id in active_calls:
+        operator_id = active_calls[call_id].get("operatorId")
+    
+    op_info = get_operator_info(operator_id) if operator_id else {}
+    op_name = op_info.get("name") or (active_calls.get(call_id, {}).get("operatorName", "Priya Sharma"))
+    op_role = op_info.get("role") or (active_calls.get(call_id, {}).get("operatorRole", "Customer Support Executive"))
+
     room_name = f"call_{call_id}"
-    await sio.emit("OPERATOR_READY", {"callId": call_id}, room=room_name)
+    await sio.emit("OPERATOR_READY", {
+        "callId": call_id,
+        "operatorId": operator_id,
+        "operatorName": op_name,
+        "operatorRole": op_role
+    }, room=room_name)
 
 
 @sio.event
@@ -472,10 +542,20 @@ async def END_CALL(sid: str, data: Dict[str, Any]):
     call_queue = [c for c in call_queue if c["callId"] != call_id]
 
     op_id = None
+    op_name = None
+    duration_seconds = 0
     if call_id and call_id in active_calls:
         session = active_calls.pop(call_id, None)
         if session:
             op_id = session.get("operatorId")
+            op_name = session.get("operatorName")
+            start_time_str = session.get("startTime")
+            if start_time_str:
+                try:
+                    start_dt = datetime.fromisoformat(start_time_str)
+                    duration_seconds = max(1, int((datetime.utcnow() - start_dt).total_seconds()))
+                except Exception:
+                    pass
 
     # If operator was in this call and is still online, restore AVAILABLE status
     if op_id and op_id in online_operators:
@@ -488,8 +568,13 @@ async def END_CALL(sid: str, data: Dict[str, Any]):
             # Check if another call is waiting in queue
             await check_and_dispatch_queued_calls()
 
-    logger.info(f"Call {call_id} ended: {reason}")
-    await sio.emit("CALL_ENDED", {"callId": call_id, "reason": reason}, room=room_name)
+    logger.info(f"Call {call_id} ended: {reason} (duration: {duration_seconds}s, agent: {op_name})")
+    await sio.emit("CALL_ENDED", {
+        "callId": call_id,
+        "reason": reason,
+        "operatorName": op_name,
+        "durationSeconds": duration_seconds
+    }, room=room_name)
 
 
 @sio.event
