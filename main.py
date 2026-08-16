@@ -4,6 +4,7 @@ Built on Starlette & Socket.IO for maximum execution speed and zero build bottle
 """
 
 import os
+import re
 import json
 import logging
 from datetime import datetime
@@ -35,57 +36,212 @@ async def health_check(request):
         "version": "1.0.0"
     })
 
+FLIGHT_DATABASE = [
+    {
+        "id": "fl_6e2262",
+        "flightNumber": "6E 2262",
+        "airline": {"code": "6E", "name": "IndiGo", "logoUrl": "/logos/indigo.png"},
+        "origin": "DEL",
+        "destination": "PNQ",
+        "destinationName": "Pune",
+        "scheduledDeparture": "2026-08-17T11:45:00Z",
+        "estimatedDeparture": None,
+        "terminal": "T2",
+        "gate": "B12",
+        "checkinCounters": "45 – 52",
+        "baggageBelt": "Carousel 4",
+        "status": "ON TIME",
+        "delayReason": None
+    },
+    {
+        "id": "fl_6e203",
+        "flightNumber": "6E 203",
+        "airline": {"code": "6E", "name": "IndiGo", "logoUrl": "/logos/indigo.png"},
+        "origin": "DEL",
+        "destination": "MAA",
+        "destinationName": "Chennai",
+        "scheduledDeparture": "2026-08-17T10:45:00Z",
+        "estimatedDeparture": "2026-08-17T11:45:00Z",
+        "terminal": "T2",
+        "gate": "B14",
+        "checkinCounters": "45 – 52",
+        "baggageBelt": "Carousel 4",
+        "status": "DELAYED",
+        "delayReason": "Late arrival of incoming aircraft from Chennai"
+    },
+    {
+        "id": "fl_ai101",
+        "flightNumber": "AI 101",
+        "airline": {"code": "AI", "name": "Air India", "logoUrl": "/logos/airindia.png"},
+        "origin": "DEL",
+        "destination": "LHR",
+        "destinationName": "London Heathrow",
+        "scheduledDeparture": "2026-08-17T12:15:00Z",
+        "estimatedDeparture": None,
+        "terminal": "T3",
+        "gate": "A08",
+        "checkinCounters": "12 – 24",
+        "baggageBelt": "Carousel 9",
+        "status": "BOARDING",
+        "delayReason": None
+    },
+    {
+        "id": "fl_uk812",
+        "flightNumber": "UK 812",
+        "airline": {"code": "UK", "name": "Vistara", "logoUrl": "/logos/vistara.png"},
+        "origin": "DEL",
+        "destination": "BLR",
+        "destinationName": "Bengaluru",
+        "scheduledDeparture": "2026-08-17T13:30:00Z",
+        "estimatedDeparture": None,
+        "terminal": "T3",
+        "gate": "A14",
+        "checkinCounters": "25 – 32",
+        "baggageBelt": "Carousel 7",
+        "status": "ON TIME",
+        "delayReason": None
+    },
+    {
+        "id": "fl_sg812",
+        "flightNumber": "SG 812",
+        "airline": {"code": "SG", "name": "SpiceJet", "logoUrl": "/logos/spicejet.png"},
+        "origin": "DEL",
+        "destination": "BOM",
+        "destinationName": "Mumbai",
+        "scheduledDeparture": "2026-08-17T10:45:00Z",
+        "estimatedDeparture": "2026-08-17T11:45:00Z",
+        "terminal": "T1",
+        "gate": "C04",
+        "checkinCounters": "08 – 14",
+        "baggageBelt": "Carousel 2",
+        "status": "DELAYED",
+        "delayReason": "Late arrival of incoming aircraft from Mumbai"
+    },
+    {
+        "id": "fl_qp1102",
+        "flightNumber": "QP 1102",
+        "airline": {"code": "QP", "name": "Akasa Air", "logoUrl": "/logos/akasa.png"},
+        "origin": "DEL",
+        "destination": "AMD",
+        "destinationName": "Ahmedabad",
+        "scheduledDeparture": "2026-08-17T14:15:00Z",
+        "estimatedDeparture": None,
+        "terminal": "T2",
+        "gate": "B06",
+        "checkinCounters": "35 – 42",
+        "baggageBelt": "Carousel 5",
+        "status": "ON TIME",
+        "delayReason": None
+    },
+    {
+        "id": "fl_ai202",
+        "flightNumber": "AI 202",
+        "airline": {"code": "AI", "name": "Air India", "logoUrl": "/logos/airindia.png"},
+        "origin": "DEL",
+        "destination": "HYD",
+        "destinationName": "Hyderabad",
+        "scheduledDeparture": "2026-08-17T16:15:00Z",
+        "estimatedDeparture": None,
+        "terminal": "T3",
+        "gate": "A10",
+        "checkinCounters": "12 – 24",
+        "baggageBelt": "Carousel 9",
+        "status": "BOARDING",
+        "delayReason": None
+    },
+    {
+        "id": "fl_6e504",
+        "flightNumber": "6E 504",
+        "airline": {"code": "6E", "name": "IndiGo", "logoUrl": "/logos/indigo.png"},
+        "origin": "DEL",
+        "destination": "CCU",
+        "destinationName": "Kolkata",
+        "scheduledDeparture": "2026-08-17T15:00:00Z",
+        "estimatedDeparture": None,
+        "terminal": "T2",
+        "gate": "B10",
+        "checkinCounters": "45 – 52",
+        "baggageBelt": "Carousel 4",
+        "status": "ON TIME",
+        "delayReason": None
+    },
+    {
+        "id": "fl_uk955",
+        "flightNumber": "UK 955",
+        "airline": {"code": "UK", "name": "Vistara", "logoUrl": "/logos/vistara.png"},
+        "origin": "DEL",
+        "destination": "BOM",
+        "destinationName": "Mumbai",
+        "scheduledDeparture": "2026-08-17T17:45:00Z",
+        "estimatedDeparture": None,
+        "terminal": "T3",
+        "gate": "A12",
+        "checkinCounters": "25 – 32",
+        "baggageBelt": "Carousel 7",
+        "status": "ON TIME",
+        "delayReason": None
+    },
+    {
+        "id": "fl_6e174",
+        "flightNumber": "6E 174",
+        "airline": {"code": "6E", "name": "IndiGo", "logoUrl": "/logos/indigo.png"},
+        "origin": "DEL",
+        "destination": "GOI",
+        "destinationName": "Goa (Dabolim)",
+        "scheduledDeparture": "2026-08-17T18:30:00Z",
+        "estimatedDeparture": None,
+        "terminal": "T2",
+        "gate": "B08",
+        "checkinCounters": "45 – 52",
+        "baggageBelt": "Carousel 4",
+        "status": "ON TIME",
+        "delayReason": None
+    }
+]
+
 async def search_flights(request):
-    query = request.query_params.get("query", "6E203")
-    sample_flights = [
-        {
-            "id": "fl_6e203",
-            "flightNumber": "6E 203",
-            "airline": {"code": "6E", "name": "IndiGo", "logoUrl": "/logos/indigo.png"},
+    raw_query = request.query_params.get("query", "").strip()
+    clean_q = re.sub(r"\s+", "", raw_query).upper()
+    
+    if not clean_q:
+        return JSONResponse({"success": True, "data": FLIGHT_DATABASE})
+        
+    matches = []
+    for f in FLIGHT_DATABASE:
+        f_num_clean = re.sub(r"\s+", "", f["flightNumber"]).upper()
+        if (clean_q in f_num_clean or 
+            clean_q == f["origin"].upper() or 
+            clean_q == f["destination"].upper() or 
+            clean_q in f["destinationName"].upper() or 
+            clean_q in f["airline"]["name"].upper()):
+            matches.append(f)
+            
+    if not matches and len(clean_q) >= 3:
+        carrier_code = clean_q[:2]
+        num_part = re.sub(r"\D", "", clean_q) or "202"
+        from services.bcbp_decoder import AIRLINES
+        airline_info = AIRLINES.get(carrier_code, {"code": carrier_code, "name": "Domestic Airline", "logoUrl": "/logos/indigo.png", "defaultTerminal": "T2"})
+        formatted_fnum = f"{carrier_code} {num_part}"
+        
+        dynamic_flight = {
+            "id": f"fl_{carrier_code.lower()}{num_part}",
+            "flightNumber": formatted_fnum,
+            "airline": airline_info,
             "origin": "DEL",
-            "destination": "MAA",
-            "destinationName": "Chennai",
-            "scheduledDeparture": "2026-08-12T10:45:00Z",
-            "estimatedDeparture": "2026-08-12T11:45:00Z",
-            "terminal": "T2",
-            "gate": "B12",
+            "destination": "PNQ" if ("PUNE" in clean_q or "PNQ" in clean_q or "2262" in clean_q) else "BOM",
+            "destinationName": "Pune" if ("PUNE" in clean_q or "PNQ" in clean_q or "2262" in clean_q) else "Mumbai",
+            "scheduledDeparture": "2026-08-17T11:45:00Z",
+            "estimatedDeparture": None,
+            "terminal": airline_info.get("defaultTerminal", "T2"),
+            "gate": "B12" if carrier_code == "6E" else "A08" if carrier_code == "AI" else "C04",
             "checkinCounters": "45 – 52",
             "baggageBelt": "Carousel 4",
-            "status": "DELAYED",
-            "delayReason": "Late arrival of incoming aircraft from Chennai"
-        },
-        {
-            "id": "fl_ai101",
-            "flightNumber": "AI 101",
-            "airline": {"code": "AI", "name": "Air India", "logoUrl": "/logos/airindia.png"},
-            "origin": "DEL",
-            "destination": "LHR",
-            "destinationName": "London Heathrow",
-            "scheduledDeparture": "2026-08-12T12:15:00Z",
-            "terminal": "T3",
-            "gate": "A08",
-            "checkinCounters": "12 – 24",
-            "baggageBelt": "Carousel 9",
-            "status": "BOARDING"
-        },
-        {
-            "id": "fl_sg812",
-            "flightNumber": "SG 812",
-            "airline": {"code": "SG", "name": "SpiceJet", "logoUrl": "/logos/spicejet.png"},
-            "origin": "DEL",
-            "destination": "BOM",
-            "destinationName": "Mumbai",
-            "scheduledDeparture": "2026-08-12T10:45:00Z",
-            "estimatedDeparture": "2026-08-12T11:45:00Z",
-            "terminal": "T1",
-            "gate": "C04",
-            "checkinCounters": "08 – 14",
-            "baggageBelt": "Carousel 2",
-            "status": "DELAYED",
-            "delayReason": "Late arrival of incoming aircraft from Mumbai"
+            "status": "ON TIME",
+            "delayReason": None
         }
-    ]
-    return JSONResponse({"success": True, "data": sample_flights})
+        matches.append(dynamic_flight)
+        
+    return JSONResponse({"success": True, "data": matches if matches else FLIGHT_DATABASE})
 
 async def decode_bcbp(request):
     try:
@@ -93,36 +249,72 @@ async def decode_bcbp(request):
     except Exception:
         body = {}
     raw_bc = body.get("rawBarcode") or body.get("barcode") or ""
+    kiosk_id = body.get("kioskId", "T3-L1-K04")
+
     if raw_bc:
         try:
             from services.bcbp_decoder import decode_bcbp as parse_bcbp
             decoded = parse_bcbp(raw_bc)
-            pname = decoded.get("passenger_name", "LUC DESMARAIS")
-            # Format "DESMARAIS LUC" into "Luc Desmarais"
-            if " " in pname:
-                parts = pname.split()
-                formatted_name = " ".join([p.capitalize() for p in reversed(parts)])
-            else:
-                formatted_name = pname.title()
+            
+            pname = decoded.get("passenger_name", "Nirant Patil")
+            pnr = decoded.get("pnr", "K9BZMM")
+            flight_number = decoded.get("flight_number", "6E 2262")
+            airline_code = decoded.get("airline_code", "6E")
+            airline_name = decoded.get("airline_name", "IndiGo")
+            airline_logo = decoded.get("airline_logo", "/logos/indigo.png")
+            origin = decoded.get("origin_iata", "DEL")
+            origin_city = decoded.get("origin_city", "Delhi")
+            destination = decoded.get("destination_iata", "PNQ")
+            destination_city = decoded.get("destination_city", "Pune")
+            seat_num = decoded.get("seat_number", "20B")
+            cabin = decoded.get("cabin_class", "Economy (Y)")
+            terminal = decoded.get("terminal", "T2")
+            gate = decoded.get("gate", "B12")
+            belt = decoded.get("baggage_belt", "Carousel 4")
+            status = decoded.get("status", "ON TIME")
+
+            # Record in Database ScanLog
+            try:
+                from database import SessionLocal
+                from models import ScanLog
+                db = SessionLocal()
+                scan_rec = ScanLog(
+                    kiosk_id=kiosk_id,
+                    passenger_name=pname,
+                    flight_number=flight_number,
+                    pnr=pnr,
+                    seat=seat_num,
+                    barcode_format="IATA_BCBP_PDF417",
+                    scan_result="SUCCESS",
+                    raw_data=raw_bc[:255]
+                )
+                db.add(scan_rec)
+                db.commit()
+                db.close()
+            except Exception as dbe:
+                logger.warning(f"Could not persist ScanLog: {dbe}")
 
             return JSONResponse({
                 "success": True,
                 "data": {
-                    "passengerName": formatted_name,
-                    "pnr": decoded.get("pnr", "ABC123"),
-                    "flightNumber": decoded.get("flight_number", "6E 203"),
-                    "airline": {"code": decoded.get("airline_code", "6E"), "name": "IndiGo", "logoUrl": "/logos/indigo.png"},
-                    "origin": decoded.get("origin_iata", "DEL"),
-                    "destination": decoded.get("destination_iata", "MAA"),
-                    "destinationName": "Chennai" if decoded.get("destination_iata") == "MAA" else "London Heathrow",
-                    "scheduledDeparture": "2026-08-12T10:45:00Z",
-                    "estimatedDeparture": "2026-08-12T11:45:00Z",
-                    "terminal": "T2",
-                    "gate": "B12",
+                    "passengerName": pname,
+                    "pnr": pnr,
+                    "flightNumber": flight_number,
+                    "airline": {"code": airline_code, "name": airline_name, "logoUrl": airline_logo},
+                    "origin": origin,
+                    "originCity": origin_city,
+                    "destination": destination,
+                    "destinationName": destination_city,
+                    "seatNumber": seat_num,
+                    "cabinClass": cabin,
+                    "scheduledDeparture": "2026-08-17T11:45:00Z",
+                    "estimatedDeparture": "2026-08-17T11:45:00Z",
+                    "terminal": terminal,
+                    "gate": gate,
                     "checkinCounters": "45 – 52",
-                    "baggageBelt": "Carousel 4",
-                    "status": "DELAYED",
-                    "delayReason": "Late arrival of incoming aircraft"
+                    "baggageBelt": belt,
+                    "status": status,
+                    "rawBarcode": raw_bc
                 }
             })
         except Exception as e:
@@ -131,21 +323,23 @@ async def decode_bcbp(request):
     return JSONResponse({
         "success": True,
         "data": {
-            "passengerName": "Luc Desmarais",
-            "pnr": "ABC123",
-            "flightNumber": "6E 203",
+            "passengerName": "Nirant Patil",
+            "pnr": "K9BZMM",
+            "flightNumber": "6E 2262",
             "airline": {"code": "6E", "name": "IndiGo", "logoUrl": "/logos/indigo.png"},
             "origin": "DEL",
-            "destination": "MAA",
-            "destinationName": "Chennai",
-            "scheduledDeparture": "2026-08-12T10:45:00Z",
-            "estimatedDeparture": "2026-08-12T11:45:00Z",
+            "originCity": "Delhi",
+            "destination": "PNQ",
+            "destinationName": "Pune",
+            "seatNumber": "20B",
+            "cabinClass": "Economy (Y)",
+            "scheduledDeparture": "2026-08-17T11:45:00Z",
+            "estimatedDeparture": "2026-08-17T11:45:00Z",
             "terminal": "T2",
             "gate": "B12",
             "checkinCounters": "45 – 52",
             "baggageBelt": "Carousel 4",
-            "status": "DELAYED",
-            "delayReason": "Late arrival of incoming aircraft"
+            "status": "ON TIME"
         }
     })
 
@@ -169,7 +363,8 @@ async def list_pois(request):
 async def process_ai_intent(request):
     body = await request.json() if request.method == "POST" else {}
     transcript = body.get("transcript", "Help me find pharmacy")
-    intent = await parse_ai_intent(transcript)
+    context = body.get("context", {})
+    intent = await parse_ai_intent(transcript, kiosk_context=context)
     return JSONResponse({"success": True, "data": intent})
 
 async def get_operator_queue(request):

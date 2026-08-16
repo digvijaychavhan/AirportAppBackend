@@ -20,11 +20,29 @@ def fallback_intent_parser(transcript: str, kiosk_context: Optional[Dict[str, An
     t_lower = transcript.strip().lower()
     mode = "elevator" if any(w in t_lower for w in ["wheelchair", "elevator", "lift", "accessible", "handicap"]) else "escalator"
 
+    # Category 0: Passenger Flight & Gate Queries
+    pname = (kiosk_context or {}).get("passenger_name") or (kiosk_context or {}).get("passengerName")
+    fnum = (kiosk_context or {}).get("flight_number") or (kiosk_context or {}).get("flightNumber") or "6E 2262"
+    gate = (kiosk_context or {}).get("gate") or "Gate B12"
+    seat = (kiosk_context or {}).get("seat") or (kiosk_context or {}).get("seatNumber") or "20B"
+    dest = (kiosk_context or {}).get("destinationName") or (kiosk_context or {}).get("destination") or "Pune"
+
+    if any(w in t_lower for w in ["my flight", "flight status", "gate", "where is my gate", "my seat", "boarding", "departure"]):
+        greeting = f"Hello {pname}! " if pname else ""
+        resp = f"{greeting}Your flight {fnum} to {dest} is on time. Gate is {gate} and your assigned seat is {seat}."
+        return {
+            "action": "map" if any(w in t_lower for w in ["gate", "where", "direction", "way"]) else "category_page",
+            "targetRoute": None if any(w in t_lower for w in ["gate", "where", "direction", "way"]) else "/flights",
+            "stops": [gate] if any(w in t_lower for w in ["gate", "where", "direction", "way"]) else [],
+            "mode": mode,
+            "speechResponse": resp
+        }
+
     # Category 1: Greetings & Chit-chat -> conversation
     greetings = ["hi", "hello", "hey", "who are you", "what is your name", "i am ", "my name is", "how are you"]
     if any(t_lower.startswith(g) or g in t_lower for g in greetings) and not any(k in t_lower for k in ["where", "take me", "show", "way to", "direction", "buy", "eat"]):
         name_match = re.search(r"(?:i am|my name is)\s+([a-zA-Z]+)", t_lower)
-        user_name = name_match.group(1).capitalize() if name_match else None
+        user_name = name_match.group(1).capitalize() if name_match else pname
         greeting_text = f"Hello {user_name}! I am Aero AI, your airport digital assistant at Terminal 3. How can I help your journey today?" if user_name else "Hello! I am Aero AI, your airport digital helpdesk assistant. How can I assist you today?"
         return {
             "action": "conversation",
