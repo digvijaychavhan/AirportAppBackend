@@ -110,11 +110,11 @@ class Poi(Base):
 
     id = Column(String, primary_key=True, default=generate_uuid)
     name = Column(String, nullable=False)
-    category = Column(String, nullable=False)  # eat-dine, shopping, lounge, etc.
+    category = Column(String, nullable=False)  # eat-dine, shopping, lounge, services, amenities, gates
     sub_category = Column(String, nullable=True) # cafe, fastfood, electronics, etc.
     description = Column(String, nullable=True)
-    terminal = Column(String, nullable=True)
-    floor_name = Column(String, nullable=True)
+    terminal = Column(String, nullable=True, default="Terminal 3")
+    floor_name = Column(String, nullable=True, default="Level 1")
     gate = Column(String, nullable=True)
     distance_m = Column(Integer, default=0)
     badge_label = Column(String, nullable=True)
@@ -126,6 +126,9 @@ class Poi(Base):
     dietary_tags = Column(String, nullable=True)
     rating = Column(Float, default=4.5)
     image_url = Column(String, nullable=True)
+    x_coord = Column(Float, nullable=True)  # Optional coordinates
+    y_coord = Column(Float, nullable=True)  # Optional coordinates
+    is_active = Column(Boolean, default=True)
 
     node = relationship("MapNode", back_populates="pois")
     floor = relationship("MapFloor", back_populates="pois")
@@ -137,9 +140,15 @@ class Operator(Base):
     id = Column(String, primary_key=True, default=generate_uuid)
     employee_code = Column(String, unique=True, index=True, nullable=False)
     name = Column(String, nullable=False)
+    password = Column(String, default="operator123")
     role = Column(String, default="Assistant")
     status = Column(String, default="available")  # available, busy, offline
     supported_languages = Column(String, default="English, Hindi")
+    calls_handled = Column(Integer, default=0)
+    avg_handle_time = Column(String, default="2m 30s")
+    resolution_rate = Column(String, default="98%")
+    shift = Column(String, default="Morning (06:00 - 14:00)")
+    created_at = Column(DateTime, default=datetime.utcnow)
 
     calls = relationship("SupportCall", back_populates="operator")
 
@@ -220,3 +229,55 @@ class WayfindingCategory(Base):
     icon_bg = Column(String, nullable=False, default="#DBEAFE")     # Default to light blue
     route = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)
+
+
+class Device(Base):
+    __tablename__ = "devices"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    device_id = Column(String, unique=True, index=True, nullable=False)  # e.g. "KIOSK-T3-L1-04"
+    name = Column(String, nullable=False)  # "Kiosk T3-L1-K04 Central Concourse"
+    device_type = Column(String, default="kiosk")  # kiosk, operator_terminal, scanner, display
+    ip_address = Column(String, default="192.168.1.104")
+    mac_address = Column(String, default="00:1A:2B:3C:4D:5E")
+    terminal = Column(String, default="Terminal 3")
+    floor_name = Column(String, default="Level 1")
+    location = Column(String, default="Near Gate B12")
+    status = Column(String, default="online")  # online, warning, offline
+    ping_ms = Column(Integer, default=12)
+    cpu_pct = Column(Integer, default=24)
+    ram_pct = Column(Integer, default=48)
+    screen_status = Column(String, default="OK")
+    scanner_status = Column(String, default="OK")
+    camera_status = Column(String, default="OK")
+    last_heartbeat = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ScanLog(Base):
+    __tablename__ = "scan_logs"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    kiosk_id = Column(String, index=True, nullable=False)  # e.g. "T3-L1-K04"
+    passenger_name = Column(String, nullable=True)  # "Luc Desmarais"
+    flight_number = Column(String, index=True, nullable=True)  # "6E 203"
+    pnr = Column(String, nullable=True)  # "ABC123"
+    seat = Column(String, nullable=True)  # "14B"
+    barcode_format = Column(String, default="PDF417_BCBP")  # PDF417_BCBP, QR_CODE, AZTEC
+    scan_result = Column(String, nullable=False, default="SUCCESS")  # SUCCESS, FAILED
+    failure_reason = Column(String, nullable=True)  # "Corrupted barcode", "Flight expired", "Unreadable checksum"
+    raw_data = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class UserActionLog(Base):
+    __tablename__ = "user_action_logs"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    kiosk_id = Column(String, index=True, nullable=False)  # "T3-L1-K04"
+    session_id = Column(String, nullable=True)
+    action_type = Column(String, index=True, nullable=False)  # WAYFINDING_SEARCH, VIEW_MAP, START_VIDEO_CALL, etc.
+    details = Column(String, nullable=True)  # "Navigated to Third Wave Coffee"
+    metadata_json = Column(Text, nullable=True)
+    ip_address = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
