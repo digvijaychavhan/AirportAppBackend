@@ -35,16 +35,76 @@ def check_and_migrate_db():
         from database import engine
         from sqlalchemy import text
         with engine.connect() as conn:
-            result = conn.execute(text("PRAGMA table_info(support_calls);")).fetchall()
-            col_names = [r[1] for r in result]
-            if "recording_url" not in col_names:
-                conn.execute(text("ALTER TABLE support_calls ADD COLUMN recording_url VARCHAR;"))
-                conn.commit()
-                logger.info("Migrated support_calls table: added recording_url column")
-            if "recording_duration_seconds" not in col_names:
-                conn.execute(text("ALTER TABLE support_calls ADD COLUMN recording_duration_seconds INTEGER DEFAULT 0;"))
-                conn.commit()
-                logger.info("Migrated support_calls table: added recording_duration_seconds column")
+            # 1. Operators table migrations
+            try:
+                op_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(operators);")).fetchall()]
+                if op_cols:
+                    if "username" not in op_cols:
+                        conn.execute(text("ALTER TABLE operators ADD COLUMN username VARCHAR;"))
+                        logger.info("Migrated operators table: added username column")
+                    if "employee_code" not in op_cols:
+                        conn.execute(text("ALTER TABLE operators ADD COLUMN employee_code VARCHAR;"))
+                        logger.info("Migrated operators table: added employee_code column")
+                    if "password" not in op_cols:
+                        conn.execute(text("ALTER TABLE operators ADD COLUMN password VARCHAR DEFAULT 'operator123';"))
+                        logger.info("Migrated operators table: added password column")
+                    if "role" not in op_cols:
+                        conn.execute(text("ALTER TABLE operators ADD COLUMN role VARCHAR DEFAULT 'Assistant';"))
+                        logger.info("Migrated operators table: added role column")
+                    if "status" not in op_cols:
+                        conn.execute(text("ALTER TABLE operators ADD COLUMN status VARCHAR DEFAULT 'available';"))
+                        logger.info("Migrated operators table: added status column")
+                    if "supported_languages" not in op_cols:
+                        conn.execute(text("ALTER TABLE operators ADD COLUMN supported_languages VARCHAR DEFAULT 'English, Hindi';"))
+                        logger.info("Migrated operators table: added supported_languages column")
+                    if "calls_handled" not in op_cols:
+                        conn.execute(text("ALTER TABLE operators ADD COLUMN calls_handled INTEGER DEFAULT 0;"))
+                        logger.info("Migrated operators table: added calls_handled column")
+                    if "avg_handle_time" not in op_cols:
+                        conn.execute(text("ALTER TABLE operators ADD COLUMN avg_handle_time VARCHAR DEFAULT '2m 30s';"))
+                        logger.info("Migrated operators table: added avg_handle_time column")
+                    if "resolution_rate" not in op_cols:
+                        conn.execute(text("ALTER TABLE operators ADD COLUMN resolution_rate VARCHAR DEFAULT '98%';"))
+                        logger.info("Migrated operators table: added resolution_rate column")
+                    if "shift" not in op_cols:
+                        conn.execute(text("ALTER TABLE operators ADD COLUMN shift VARCHAR DEFAULT 'Morning (06:00 - 14:00)';"))
+                        logger.info("Migrated operators table: added shift column")
+                    if "created_at" not in op_cols:
+                        conn.execute(text("ALTER TABLE operators ADD COLUMN created_at DATETIME;"))
+                        logger.info("Migrated operators table: added created_at column")
+                    
+                    conn.execute(text("UPDATE operators SET username = LOWER(REPLACE(name, ' ', '.')) WHERE username IS NULL OR username = '';"))
+                    conn.commit()
+            except Exception as e:
+                logger.warning(f"Operators migration notice: {e}")
+
+            # 2. Support calls table migrations
+            try:
+                sc_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(support_calls);")).fetchall()]
+                if sc_cols:
+                    if "recording_url" not in sc_cols:
+                        conn.execute(text("ALTER TABLE support_calls ADD COLUMN recording_url VARCHAR;"))
+                        logger.info("Migrated support_calls table: added recording_url column")
+                    if "recording_duration_seconds" not in sc_cols:
+                        conn.execute(text("ALTER TABLE support_calls ADD COLUMN recording_duration_seconds INTEGER DEFAULT 0;"))
+                        logger.info("Migrated support_calls table: added recording_duration_seconds column")
+                    conn.commit()
+            except Exception as e:
+                logger.warning(f"Support calls migration notice: {e}")
+
+            # 3. POIs table migrations
+            try:
+                poi_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(pois);")).fetchall()]
+                if poi_cols:
+                    if "x_coord" not in poi_cols:
+                        conn.execute(text("ALTER TABLE pois ADD COLUMN x_coord REAL;"))
+                    if "y_coord" not in poi_cols:
+                        conn.execute(text("ALTER TABLE pois ADD COLUMN y_coord REAL;"))
+                    if "is_active" not in poi_cols:
+                        conn.execute(text("ALTER TABLE pois ADD COLUMN is_active BOOLEAN DEFAULT 1;"))
+                    conn.commit()
+            except Exception as e:
+                logger.warning(f"POIs migration notice: {e}")
     except Exception as e:
         logger.warning(f"DB migration check notice: {e}")
 

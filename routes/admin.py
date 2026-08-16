@@ -27,6 +27,40 @@ logger = logging.getLogger("admin_routes")
 # Ensure all database tables exist
 Base.metadata.create_all(bind=engine)
 
+def migrate_admin_schema():
+    try:
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            op_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(operators);")).fetchall()]
+            if op_cols:
+                if "username" not in op_cols:
+                    conn.execute(text("ALTER TABLE operators ADD COLUMN username VARCHAR;"))
+                if "employee_code" not in op_cols:
+                    conn.execute(text("ALTER TABLE operators ADD COLUMN employee_code VARCHAR;"))
+                if "password" not in op_cols:
+                    conn.execute(text("ALTER TABLE operators ADD COLUMN password VARCHAR DEFAULT 'operator123';"))
+                if "role" not in op_cols:
+                    conn.execute(text("ALTER TABLE operators ADD COLUMN role VARCHAR DEFAULT 'Assistant';"))
+                if "status" not in op_cols:
+                    conn.execute(text("ALTER TABLE operators ADD COLUMN status VARCHAR DEFAULT 'available';"))
+                if "supported_languages" not in op_cols:
+                    conn.execute(text("ALTER TABLE operators ADD COLUMN supported_languages VARCHAR DEFAULT 'English, Hindi';"))
+                if "calls_handled" not in op_cols:
+                    conn.execute(text("ALTER TABLE operators ADD COLUMN calls_handled INTEGER DEFAULT 0;"))
+                if "avg_handle_time" not in op_cols:
+                    conn.execute(text("ALTER TABLE operators ADD COLUMN avg_handle_time VARCHAR DEFAULT '2m 30s';"))
+                if "resolution_rate" not in op_cols:
+                    conn.execute(text("ALTER TABLE operators ADD COLUMN resolution_rate VARCHAR DEFAULT '98%';"))
+                if "shift" not in op_cols:
+                    conn.execute(text("ALTER TABLE operators ADD COLUMN shift VARCHAR DEFAULT 'Morning (06:00 - 14:00)';"))
+                if "created_at" not in op_cols:
+                    conn.execute(text("ALTER TABLE operators ADD COLUMN created_at DATETIME;"))
+                conn.execute(text("UPDATE operators SET username = LOWER(REPLACE(name, ' ', '.')) WHERE username IS NULL OR username = '';"))
+                conn.commit()
+    except Exception as e:
+        logger.warning(f"Admin schema migration notice: {e}")
+
+migrate_admin_schema()
 
 # ----------------------------------------------------------------------
 # Seed Default Sample Data if tables are empty
@@ -52,10 +86,10 @@ def seed_admin_defaults():
         # 2. Seed Operators
         if db.query(Operator).count() == 0:
             operators = [
-                Operator(id="op_101", employee_code="EMP-7840", name="Maya L.", role="Customer Support Executive", status="available", supported_languages="English, Hindi, Punjabi", calls_handled=38, avg_handle_time="2m 14s", resolution_rate="99%", shift="Morning (06:00 - 14:00)"),
-                Operator(id="op_102", employee_code="EMP-9021", name="Priya Sharma", role="Passenger Assistance Specialist", status="available", supported_languages="English, Hindi, Tamil", calls_handled=29, avg_handle_time="2m 45s", resolution_rate="97%", shift="Morning (06:00 - 14:00)"),
-                Operator(id="op_103", employee_code="EMP-9022", name="Rahul Verma", role="Accessibility & ADA Officer", status="offline", supported_languages="English, Hindi, Marathi", calls_handled=17, avg_handle_time="3m 10s", resolution_rate="100%", shift="Evening (14:00 - 22:00)"),
-                Operator(id="op_104", employee_code="EMP-9023", name="Ananya Patel", role="Customer Support Executive", status="available", supported_languages="English, Gujarati, Hindi", calls_handled=42, avg_handle_time="1m 58s", resolution_rate="98%", shift="Night (22:00 - 06:00)"),
+                Operator(id="op_101", username="maya.l", employee_code="EMP-7840", name="Maya L.", password="operator123", role="Customer Support Executive", status="available", supported_languages="English, Hindi, Punjabi", calls_handled=38, avg_handle_time="2m 14s", resolution_rate="99%", shift="Morning (06:00 - 14:00)"),
+                Operator(id="op_102", username="priya.sharma", employee_code="EMP-9021", name="Priya Sharma", password="operator123", role="Passenger Assistance Specialist", status="available", supported_languages="English, Hindi, Tamil", calls_handled=29, avg_handle_time="2m 45s", resolution_rate="97%", shift="Morning (06:00 - 14:00)"),
+                Operator(id="op_103", username="rahul.verma", employee_code="EMP-9022", name="Rahul Verma", password="operator123", role="Accessibility & ADA Officer", status="offline", supported_languages="English, Hindi, Marathi", calls_handled=17, avg_handle_time="3m 10s", resolution_rate="100%", shift="Evening (14:00 - 22:00)"),
+                Operator(id="op_104", username="ananya.patel", employee_code="EMP-9023", name="Ananya Patel", password="operator123", role="Customer Support Executive", status="available", supported_languages="English, Gujarati, Hindi", calls_handled=42, avg_handle_time="1m 58s", resolution_rate="98%", shift="Night (22:00 - 06:00)"),
             ]
             db.add_all(operators)
             db.commit()
