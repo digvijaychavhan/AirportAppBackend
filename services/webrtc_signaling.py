@@ -73,8 +73,12 @@ def get_longest_idle_available_operator(exclude_op_id: str = None) -> Any:
 
 async def dispatch_call_to_operator(call_data: Dict[str, Any], target_op: Dict[str, Any]):
     """
-    Emits incoming call ringing event to the allocated operator.
+    Emits incoming call ringing event ONLY to the specific allocated available operator.
     """
+    if not target_op or target_op.get("status") != "AVAILABLE":
+        logger.info(f"Target operator {target_op.get('operatorId')} is not AVAILABLE (Status: {target_op.get('status')})")
+        return
+
     call_id = call_data["callId"]
     ring_start = call_data.get("ringStartTime") or datetime.utcnow().isoformat()
     call_data["ringStartTime"] = ring_start
@@ -91,11 +95,9 @@ async def dispatch_call_to_operator(call_data: Dict[str, Any], target_op: Dict[s
         "adaPriority": call_data.get("adaPriority", False)
     }
 
-    logger.info(f"Allocating call {call_id} to longest-idle operator {target_op['operatorId']} (SID: {target_op['sid']})")
+    logger.info(f"Allocating call {call_id} to available operator {target_op['operatorId']} (SID: {target_op.get('sid')})")
     if target_op.get("sid"):
         await sio.emit("INCOMING_CALL_RINGING", payload, room=target_op["sid"])
-    # Broadcast to room 'operators' so all operator tabs/views receive the ringing popup
-    await sio.emit("INCOMING_CALL_RINGING", payload, room="operators")
 
 
 async def check_and_dispatch_queued_calls():
@@ -261,11 +263,18 @@ async def OPERATOR_STATUS_UPDATE(sid: str, data: Dict[str, Any]):
         online_operators[op_id]["sid"] = sid
         if status == "AVAILABLE":
             online_operators[op_id]["availableSince"] = datetime.utcnow().timestamp()
-            logger.info(f"Operator {op_id} is now ONLINE & AVAILABLE (Longest idle timer reset)")
-            # Check if any waiting call can be allocated immediately
+            logger.info(f"Operator {op_id} is now ONLINE & AVAILABLE. Checking for waiting calls in queue...")
+            # Immediately dispatch waiting calls to this operator
             await check_and_dispatch_queued_calls()
         else:
-            logger.info(f"Operator {op_id} is now OFFLINE (No calls will be dispatched)")
+            logger.info(f"Operator {op_id} is now OFFLINE (DND). No calls will ring this operator.")
+            # Dismiss any ringing call currently displayed on this operator's screen
+            for call in call_queue:
+                if call.get("allocatedOperatorId") == op_id and call.get("status") == "QUEUED":
+                    call["allocatedOperatorId"] = None
+                    await sio.emit("INCOMING_CALL_DISMISSED", {"callId": call.get("callId")}, room=sid)
+            # Re-dispatch any waiting calls to another available operator if online
+            await check_and_dispatch_queued_calls()
 
         await sio.emit("OPERATOR_STATE_SYNC", online_operators[op_id], room=sid)
 
@@ -331,18 +340,7 @@ async def CALL_REQUEST(sid: str, data: Dict[str, Any]):
     if idle_op:
         await dispatch_call_to_operator(call_data, idle_op)
     else:
-        logger.info(f"Broadcasting incoming call {call_id} to room 'operators' as fallback")
-        fallback_payload = {
-            "callId": call_id,
-            "kioskId": kiosk_id,
-            "passengerName": passenger_name,
-            "flightNumber": flight_number,
-            "pnr": pnr,
-            "ringStartTime": ring_start_time,
-            "allocatedTo": "op_101",
-            "adaPriority": ada_priority
-        }
-        await sio.emit("INCOMING_CALL_RINGING", fallback_payload, room="operators")
+        logger.info(f"No available online operator for call {call_id}. Call remains queued in waiting state until an operator becomes AVAILABLE.")
 
 
 @sio.event
