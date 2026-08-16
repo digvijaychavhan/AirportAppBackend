@@ -13,10 +13,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 from starlette.applications import Starlette
-from starlette.responses import JSONResponse
-from starlette.routing import Route
+from starlette.responses import JSONResponse, FileResponse
+from starlette.routing import Route, Mount
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
+from starlette.staticfiles import StaticFiles
 import socketio
 
 from services.webrtc_signaling import sio, active_calls
@@ -25,6 +26,29 @@ from services.ai_orchestrator import parse_ai_intent
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("main")
+
+RECORDINGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "recordings")
+os.makedirs(RECORDINGS_DIR, exist_ok=True)
+
+def check_and_migrate_db():
+    try:
+        from database import engine
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            result = conn.execute(text("PRAGMA table_info(support_calls);")).fetchall()
+            col_names = [r[1] for r in result]
+            if "recording_url" not in col_names:
+                conn.execute(text("ALTER TABLE support_calls ADD COLUMN recording_url VARCHAR;"))
+                conn.commit()
+                logger.info("Migrated support_calls table: added recording_url column")
+            if "recording_duration_seconds" not in col_names:
+                conn.execute(text("ALTER TABLE support_calls ADD COLUMN recording_duration_seconds INTEGER DEFAULT 0;"))
+                conn.commit()
+                logger.info("Migrated support_calls table: added recording_duration_seconds column")
+    except Exception as e:
+        logger.warning(f"DB migration check notice: {e}")
+
+check_and_migrate_db()
 
 
 # --- REST API Handlers ---
@@ -376,6 +400,12 @@ async def get_operator_queue(request):
 
 async def get_call_details(request):
     call_id = request.path_params.get("call_id")
+    rec_file_url = None
+    if os.path.exists(os.path.join(RECORDINGS_DIR, f"{call_id}.webm")):
+        rec_file_url = f"/recordings/{call_id}.webm"
+    elif os.path.exists(os.path.join(RECORDINGS_DIR, f"{call_id}.mp4")):
+        rec_file_url = f"/recordings/{call_id}.mp4"
+
     if call_id in active_calls:
         session = active_calls[call_id]
         op_id = session.get("operatorId")
@@ -391,7 +421,8 @@ async def get_call_details(request):
             "data": {
                 **session,
                 "operatorName": op_name or "Priya Sharma",
-                "operatorRole": op_role or "Customer Support Executive"
+                "operatorRole": op_role or "Customer Support Executive",
+                "recordingUrl": session.get("recordingUrl") or rec_file_url
             }
         })
     
@@ -410,6 +441,8 @@ async def get_call_details(request):
             op_name = call.operator.name if call.operator else "Priya Sharma"
             op_role = call.operator.role.replace("_", " ").title() if call.operator and call.operator.role else "Customer Support Executive"
 
+            rec_url = call.recording_url or rec_file_url
+
             data = {
                 "sessionId": call.id,
                 "passengerName": call.passenger_name or "Passenger",
@@ -422,6 +455,7 @@ async def get_call_details(request):
                 "operatorRole": op_role,
                 "notes": call.operator_notes or "",
                 "categories": categories_list,
+                "recordingUrl": rec_url,
                 "date": call.created_at.strftime("%d-%b-%y"),
                 "time": call.created_at.strftime("%I:%M %p"),
                 "status": "RESOLVED"
@@ -431,6 +465,17 @@ async def get_call_details(request):
         db.close()
     except Exception as e:
         logger.error(f"Error finding call details: {e}")
+
+    if rec_file_url:
+        return JSONResponse({
+            "success": True,
+            "data": {
+                "sessionId": call_id,
+                "passengerName": "Passenger",
+                "recordingUrl": rec_file_url,
+                "status": "RESOLVED"
+            }
+        })
 
     return JSONResponse({"success": False, "message": "Call not found"}, status_code=404)
 
@@ -580,6 +625,13 @@ async def get_operator_logs(request):
             seconds = c.call_duration_seconds % 60
             duration_str = f"{minutes:02d}:{seconds:02d}"
             
+            rec_url = c.recording_url
+            if not rec_url:
+                if os.path.exists(os.path.join(RECORDINGS_DIR, f"{c.id}.webm")):
+                    rec_url = f"/recordings/{c.id}.webm"
+                elif os.path.exists(os.path.join(RECORDINGS_DIR, f"{c.id}.mp4")):
+                    rec_url = f"/recordings/{c.id}.mp4"
+
             logs.append({
                 "session": c.id,
                 "date": c.created_at.strftime("%d-%b-%y"),
@@ -590,6 +642,7 @@ async def get_operator_logs(request):
                 "notes": c.operator_notes or "",
                 "status": "RESOLVED",
                 "categories": c.issue_category.split(", ") if c.issue_category else [],
+                "recordingUrl": rec_url,
                 "flightNo": c.flight_number or ""
             })
             
@@ -598,6 +651,75 @@ async def get_operator_logs(request):
     except Exception as e:
         logger.error(f"Error fetching logs: {e}")
         return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+async def upload_call_recording(request):
+    call_id = request.path_params.get("call_id")
+    if not call_id:
+        return JSONResponse({"success": False, "message": "call_id parameter required"}, status_code=400)
+        
+    try:
+        content_type = request.headers.get("content-type", "")
+        file_bytes = b""
+        filename = f"{call_id}.webm"
+        
+        if "multipart/form-data" in content_type:
+            form = await request.form()
+            upload_file = form.get("file") or form.get("recording") or form.get("video")
+            if upload_file:
+                file_bytes = await upload_file.read()
+                if hasattr(upload_file, "filename") and upload_file.filename and upload_file.filename.endswith(".mp4"):
+                    filename = f"{call_id}.mp4"
+        else:
+            file_bytes = await request.body()
+            
+        if not file_bytes:
+            return JSONResponse({"success": False, "message": "Empty recording payload"}, status_code=400)
+            
+        dest_path = os.path.join(RECORDINGS_DIR, filename)
+        with open(dest_path, "wb") as f:
+            f.write(file_bytes)
+            
+        rel_url = f"/recordings/{filename}"
+        
+        # Update database SupportCall
+        from database import SessionLocal
+        from models import SupportCall
+        db = SessionLocal()
+        call = db.query(SupportCall).filter(SupportCall.id == call_id).first()
+        if call:
+            call.recording_url = rel_url
+            db.commit()
+            logger.info(f"Attached recording {rel_url} to call {call_id}")
+        db.close()
+        
+        return JSONResponse({
+            "success": True,
+            "message": "Recording uploaded and linked successfully",
+            "callId": call_id,
+            "recordingUrl": rel_url,
+            "sizeBytes": len(file_bytes)
+        })
+    except Exception as e:
+        logger.error(f"Error uploading call recording for {call_id}: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+async def download_recording(request):
+    call_id = request.path_params.get("call_id")
+    filename = f"{call_id}.webm"
+    file_path = os.path.join(RECORDINGS_DIR, filename)
+    if not os.path.exists(file_path):
+        filename = f"{call_id}.mp4"
+        file_path = os.path.join(RECORDINGS_DIR, filename)
+        
+    if not os.path.exists(file_path):
+        return JSONResponse({"success": False, "message": "Recording not found"}, status_code=404)
+        
+    return FileResponse(
+        path=file_path,
+        media_type="video/webm" if filename.endswith(".webm") else "video/mp4",
+        filename=f"call_recording_{call_id}.webm",
+        headers={"Content-Disposition": f'attachment; filename="call_recording_{call_id}.webm"'}
+    )
 
 async def submit_feedback(request):
     try:
@@ -786,10 +908,13 @@ routes = [
     Route("/api/v1/wifi/request-otp", request_wifi_otp, methods=["POST"]),
     Route("/api/v1/wifi/verify-otp", verify_wifi_otp, methods=["POST"]),
     Route("/api/v1/wifi/scan-passport", scan_passport_for_wifi, methods=["POST"]),
+    Route("/api/v1/operator/call/{call_id}/recording", upload_call_recording, methods=["POST"]),
+    Route("/api/v1/operator/call/{call_id}/download-recording", download_recording),
     Route("/api/v1/baggage/belts", get_baggage_belts),
     Route("/api/v1/directory", get_directory_pois),
     Route("/api/v1/transfer/shuttles", get_shuttle_schedules),
     Route("/api/v1/kiosk/heartbeat", kiosk_heartbeat, methods=["POST"]),
+    Mount("/recordings", app=StaticFiles(directory=RECORDINGS_DIR), name="recordings"),
 ] + map_editor_routes + admin_routes
 
 middleware = [

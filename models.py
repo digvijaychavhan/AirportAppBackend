@@ -170,6 +170,8 @@ class SupportCall(Base):
     passenger_name = Column(String, nullable=True)
     flight_number = Column(String, nullable=True)
     pnr = Column(String, nullable=True)
+    recording_url = Column(String, nullable=True)
+    recording_duration_seconds = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     kiosk = relationship("Kiosk")

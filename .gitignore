@@ -6,3 +6,5 @@ app.db
 .venv/
 venv/
 env/
+recordings/*.webm
+recordings/*.mp4
