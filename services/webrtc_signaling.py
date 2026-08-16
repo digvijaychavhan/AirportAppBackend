@@ -148,20 +148,30 @@ async def disconnect(sid: str):
         # Clean up active calls if client was in an active call
         call_id = client_info.get("active_call_id")
         if call_id and call_id in active_calls:
-            call_session = active_calls[call_id]
+            call_session = active_calls.pop(call_id, None)
+            dur_secs = 0
+            if call_session:
+                start_time_str = call_session.get("startTime")
+                if start_time_str:
+                    try:
+                        start_dt = datetime.fromisoformat(start_time_str)
+                        dur_secs = max(1, int((datetime.utcnow() - start_dt).total_seconds()))
+                    except Exception:
+                        pass
+                auto_save_support_call(call_id, call_session, dur_secs)
+
             logger.info(f"Terminating call session {call_id} due to disconnect of {sid}")
             await sio.emit(
                 "CALL_ENDED",
-                {"callId": call_id, "reason": "PEER_DISCONNECTED"},
+                {"callId": call_id, "reason": "PEER_DISCONNECTED", "durationSeconds": dur_secs},
                 room=f"call_{call_id}"
             )
             # If an operator was in this call, make them available again
-            op_id = call_session.get("operatorId")
+            op_id = call_session.get("operatorId") if call_session else None
             if op_id and op_id in online_operators:
                 online_operators[op_id]["status"] = "AVAILABLE"
                 online_operators[op_id]["availableSince"] = datetime.utcnow().timestamp()
                 online_operators[op_id]["currentCallId"] = None
-            active_calls.pop(call_id, None)
 
 
 @sio.event
@@ -527,6 +537,58 @@ async def ICE_CANDIDATE(sid: str, data: Dict[str, Any]):
     await sio.emit("ICE_CANDIDATE", {"callId": call_id, "candidate": candidate}, room=room_name, skip_sid=sid)
 
 
+def auto_save_support_call(call_id: str, session: Dict[str, Any], duration_seconds: int):
+    """
+    Automatically persists default SupportCall details to database as soon as a call completes,
+    guaranteeing the record exists even if the operator does not manually submit the form.
+    """
+    if not call_id:
+        return
+    try:
+        from database import SessionLocal
+        from models import SupportCall, Kiosk
+        db = SessionLocal()
+        
+        existing = db.query(SupportCall).filter(SupportCall.id == call_id).first()
+        kiosk_id = (session or {}).get("kioskId", "T3-L1-K04")
+        kiosk_obj = db.query(Kiosk).filter((Kiosk.id == kiosk_id) | (Kiosk.code == kiosk_id)).first()
+        kiosk_db_id = kiosk_obj.id if kiosk_obj else "T3-L1-K04"
+        
+        op_id = (session or {}).get("operatorId") or "op_101"
+        passenger_name = (session or {}).get("passengerName") or "Luc Desmarais"
+        flight_number = (session or {}).get("flightNumber") or "6E 203"
+        pnr = (session or {}).get("pnr") or "ABC123"
+        
+        if existing:
+            existing.call_duration_seconds = max(1, duration_seconds) if duration_seconds > 0 else existing.call_duration_seconds
+            existing.status = "ended"
+            if not existing.passenger_name or existing.passenger_name == "Passenger":
+                existing.passenger_name = passenger_name
+            if not existing.flight_number:
+                existing.flight_number = flight_number
+            db.commit()
+            logger.info(f"Auto-save updated existing support call {call_id}")
+        else:
+            new_call = SupportCall(
+                id=call_id,
+                kiosk_id=kiosk_db_id,
+                operator_id=op_id,
+                status="ended",
+                call_duration_seconds=max(1, duration_seconds),
+                issue_category="General Inquiry",
+                operator_notes="Assisted passenger at kiosk.",
+                passenger_name=passenger_name,
+                flight_number=flight_number,
+                pnr=pnr
+            )
+            db.add(new_call)
+            db.commit()
+            logger.info(f"Auto-saved default support call record to DB: {call_id}")
+        db.close()
+    except Exception as e:
+        logger.error(f"Error auto-saving support call {call_id}: {e}")
+
+
 @sio.event
 async def END_CALL(sid: str, data: Dict[str, Any]):
     """
@@ -543,6 +605,7 @@ async def END_CALL(sid: str, data: Dict[str, Any]):
     op_id = None
     op_name = None
     duration_seconds = 0
+    session = None
     if call_id and call_id in active_calls:
         session = active_calls.pop(call_id, None)
         if session:
@@ -555,6 +618,10 @@ async def END_CALL(sid: str, data: Dict[str, Any]):
                     duration_seconds = max(1, int((datetime.utcnow() - start_dt).total_seconds()))
                 except Exception:
                     pass
+
+    # Auto-save the call log immediately upon termination
+    if call_id:
+        auto_save_support_call(call_id, session, duration_seconds)
 
     # If operator was in this call and is still online, restore AVAILABLE status
     if op_id and op_id in online_operators:

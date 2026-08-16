@@ -268,21 +268,49 @@ async def submit_operator_log(request):
         categories = body.get("categories", [])
         categories_str = ", ".join(categories) if categories else None
         
-        support_call = SupportCall(
-            id=session_id if session_id and not ("demo" in session_id or "test" in session_id) else None,
-            kiosk_id=kiosk_db_id,
-            operator_id=body.get("operatorId") or body.get("operator_id") or "op_101",
-            status="ended",
-            call_duration_seconds=call_duration_seconds,
-            issue_category=categories_str,
-            operator_notes=body.get("notes", ""),
-            passenger_name=f"{body.get('firstName', '')} {body.get('lastName', '')}".strip() or "Passenger",
-            flight_number=body.get("flightNo", ""),
-            pnr="ABC123"
-        )
-        
-        db.add(support_call)
-        db.commit()
+        passenger_name = f"{body.get('firstName', '')} {body.get('lastName', '')}".strip() or body.get("passengerName") or "Luc Desmarais"
+        op_id = body.get("operatorId") or body.get("operator_id") or "op_101"
+        notes = body.get("notes", "")
+        flight_no = body.get("flightNo") or body.get("flightNumber") or ""
+        pnr = body.get("pnr") or "ABC123"
+
+        # Check if record already exists (auto-saved or previous draft)
+        existing_call = db.query(SupportCall).filter(SupportCall.id == session_id).first() if session_id else None
+        if existing_call:
+            existing_call.kiosk_id = kiosk_db_id
+            existing_call.operator_id = op_id
+            if call_duration_seconds > 0:
+                existing_call.call_duration_seconds = call_duration_seconds
+            if categories_str:
+                existing_call.issue_category = categories_str
+            if notes:
+                existing_call.operator_notes = notes
+            if passenger_name and passenger_name != "Passenger":
+                existing_call.passenger_name = passenger_name
+            if flight_no:
+                existing_call.flight_number = flight_no
+            if pnr:
+                existing_call.pnr = pnr
+            existing_call.status = "ended"
+            db.commit()
+            support_call = existing_call
+            logger.info(f"Updated existing auto-saved support call in DB: {support_call.id}")
+        else:
+            support_call = SupportCall(
+                id=session_id if session_id and not ("demo" in session_id or "test" in session_id) else None,
+                kiosk_id=kiosk_db_id,
+                operator_id=op_id,
+                status="ended",
+                call_duration_seconds=call_duration_seconds,
+                issue_category=categories_str or "General Inquiry",
+                operator_notes=notes or "Assisted passenger at kiosk.",
+                passenger_name=passenger_name,
+                flight_number=flight_no,
+                pnr=pnr
+            )
+            db.add(support_call)
+            db.commit()
+            logger.info(f"Created new support call in DB: {support_call.id}")
         
         res_data = {
             "session": support_call.id,
@@ -295,9 +323,8 @@ async def submit_operator_log(request):
             "categories": categories,
             "flightNo": support_call.flight_number
         }
-        logger.info(f"Saved support call to DB: {support_call.id}")
         db.close()
-        return JSONResponse({"success": True, "message": "Log submitted successfully", "data": res_data})
+        return JSONResponse({"success": True, "message": "Log saved and updated successfully", "data": res_data})
     except Exception as e:
         logger.error(f"Error submitting operator log: {e}")
         return JSONResponse({"success": False, "message": str(e)}, status_code=500)
