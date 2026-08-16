@@ -213,7 +213,7 @@ async def REGISTER_CLIENT(sid: str, data: Dict[str, Any]):
 
     if role == "operator":
         await sio.enter_room(sid, "operators")
-        status = data.get("status", "AVAILABLE")
+        status = data.get("status")
         name = data.get("name")
         role_name = data.get("roleName")
 
@@ -228,15 +228,16 @@ async def REGISTER_CLIENT(sid: str, data: Dict[str, Any]):
             online_operators[client_id]["sid"] = sid
             online_operators[client_id]["name"] = name
             online_operators[client_id]["roleName"] = role_name
-            if status != "PRESERVE":
+            if status and status != "PRESERVE":
                 online_operators[client_id]["status"] = status
         else:
+            initial_status = status if (status and status != "PRESERVE") else "AVAILABLE"
             online_operators[client_id] = {
                 "operatorId": client_id,
                 "sid": sid,
                 "name": name,
                 "roleName": role_name,
-                "status": status,
+                "status": initial_status,
                 "availableSince": datetime.utcnow().timestamp(),
                 "currentCallId": None
             }
