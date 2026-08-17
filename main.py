@@ -20,7 +20,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.staticfiles import StaticFiles
 import socketio
 
-from services.webrtc_signaling import sio, active_calls
+from services.webrtc_signaling import sio, active_calls, online_operators
 from services.pathfinding import compute_indoor_route
 from services.ai_orchestrator import parse_ai_intent
 
@@ -498,8 +498,19 @@ async def get_call_details(request):
             kiosk_code = call.kiosk.code if call.kiosk else (call.kiosk_id or "T3-L1-K04")
             
             categories_list = [c.strip() for c in call.issue_category.split(",")] if call.issue_category else []
-            op_name = call.operator.name if call.operator else "Priya Sharma"
-            op_role = call.operator.role.replace("_", " ").title() if call.operator and call.operator.role else "Customer Support Executive"
+            op_name = "Operator"
+            op_role = "Customer Support Executive"
+            if call.operator:
+                op_name = call.operator.name
+                op_role = call.operator.role.replace("_", " ").title() if call.operator.role else "Customer Support Executive"
+            elif call.operator_id:
+                from models import Operator
+                op_lookup = db.query(Operator).filter((Operator.id == call.operator_id) | (Operator.employee_code == call.operator_id) | (Operator.username == call.operator_id)).first()
+                if op_lookup:
+                    op_name = op_lookup.name
+                    op_role = op_lookup.role.replace("_", " ").title() if op_lookup.role else "Customer Support Executive"
+                else:
+                    op_name = call.operator_id
 
             rec_url = call.recording_url or rec_file_url
 
@@ -569,7 +580,12 @@ async def submit_operator_log(request):
         categories_str = ", ".join(categories) if categories else None
         
         passenger_name = f"{body.get('firstName', '')} {body.get('lastName', '')}".strip() or body.get("passengerName") or "Luc Desmarais"
-        op_id = body.get("operatorId") or body.get("operator_id") or "op_101"
+        raw_op_id = body.get("operatorId") or body.get("operator_id")
+        from models import Operator
+        op_obj = db.query(Operator).filter(
+            (Operator.id == raw_op_id) | (Operator.username == raw_op_id) | (Operator.employee_code == raw_op_id)
+        ).first() if raw_op_id else None
+        op_id = op_obj.id if op_obj else (raw_op_id or "op_101")
         notes = body.get("notes", "")
         flight_no = body.get("flightNo") or body.get("flightNumber") or ""
         pnr = body.get("pnr") or "ABC123"
@@ -603,7 +619,7 @@ async def submit_operator_log(request):
             existing_call.status = "ended"
             db.commit()
             support_call = existing_call
-            logger.info(f"Updated existing auto-saved support call in DB: {support_call.id} (recording: {support_call.recording_url})")
+            logger.info(f"Updated existing auto-saved support call in DB: {support_call.id} (operator: {support_call.operator_id}, recording: {support_call.recording_url})")
         else:
             support_call = SupportCall(
                 id=session_id or None,
@@ -643,11 +659,26 @@ async def submit_operator_log(request):
 async def get_operator_stats(request):
     try:
         from database import SessionLocal
-        from models import SupportCall
+        from models import SupportCall, Operator
+        from datetime import datetime, timedelta
         
         db = SessionLocal()
-        calls = db.query(SupportCall).all()
+        op_id = request.query_params.get("operatorId") or request.query_params.get("operator_id")
+        scope = request.query_params.get("scope", "me")
+        
+        query = db.query(SupportCall)
+        if op_id and scope != "all":
+            # Also resolve if op_id is username or employee code
+            op = db.query(Operator).filter(
+                (Operator.id == op_id) | (Operator.username == op_id) | (Operator.employee_code == op_id)
+            ).first()
+            actual_op_id = op.id if op else op_id
+            query = query.filter(SupportCall.operator_id == actual_op_id)
+            
+        calls = query.all()
         total = len(calls)
+        
+        active_ops_count = max(1, len([op for op in online_operators.values() if op.get("status") == "AVAILABLE"]))
         
         if total == 0:
             db.close()
@@ -657,12 +688,12 @@ async def get_operator_stats(request):
                     "totalInboundCalls": 0,
                     "avgCallTimeMinutes": "0.00",
                     "resolutionRate": "100%",
-                    "activeOperators": 3
+                    "activeOperators": active_ops_count
                 }
             })
             
         total_seconds = sum(c.call_duration_seconds for c in calls)
-        avg_minutes = (total_seconds / 60) / total
+        avg_minutes = (total_seconds / 60) / total if total > 0 else 0
         
         db.close()
         return JSONResponse({
@@ -670,8 +701,8 @@ async def get_operator_stats(request):
             "data": {
                 "totalInboundCalls": total,
                 "avgCallTimeMinutes": f"{avg_minutes:.2f}",
-                "resolutionRate": "100%",
-                "activeOperators": 3
+                "resolutionRate": "98%",
+                "activeOperators": active_ops_count
             }
         })
     except Exception as e:
@@ -681,10 +712,38 @@ async def get_operator_stats(request):
 async def get_operator_logs(request):
     try:
         from database import SessionLocal
-        from models import SupportCall
+        from models import SupportCall, Operator
+        from datetime import datetime, timedelta
         
         db = SessionLocal()
-        calls = db.query(SupportCall).order_by(SupportCall.created_at.desc()).all()
+        op_id = request.query_params.get("operatorId") or request.query_params.get("operator_id")
+        scope = request.query_params.get("scope", "me")
+        time_filter = (request.query_params.get("timeFilter") or "").lower().strip()
+        
+        query = db.query(SupportCall)
+        
+        # 1. Filter by operator
+        if op_id and scope != "all":
+            op = db.query(Operator).filter(
+                (Operator.id == op_id) | (Operator.username == op_id) | (Operator.employee_code == op_id)
+            ).first()
+            actual_op_id = op.id if op else op_id
+            query = query.filter(SupportCall.operator_id == actual_op_id)
+            
+        # 2. Filter by time
+        now = datetime.utcnow()
+        if time_filter == "today":
+            start_of_today = datetime(now.year, now.month, now.day)
+            query = query.filter(SupportCall.created_at >= start_of_today)
+        elif time_filter == "yesterday":
+            start_of_today = datetime(now.year, now.month, now.day)
+            start_of_yesterday = start_of_today - timedelta(days=1)
+            query = query.filter(SupportCall.created_at >= start_of_yesterday, SupportCall.created_at < start_of_today)
+        elif time_filter in ("this week", "this_week", "week"):
+            start_of_week = now - timedelta(days=7)
+            query = query.filter(SupportCall.created_at >= start_of_week)
+            
+        calls = query.order_by(SupportCall.created_at.desc()).all()
         
         logs = []
         for c in calls:
@@ -705,6 +764,10 @@ async def get_operator_logs(request):
                 elif os.path.exists(os.path.join(RECORDINGS_DIR, f"{c.id}.mp4")):
                     rec_url = f"/recordings/{c.id}.mp4"
 
+            op_name = c.operator.name if c.operator else "Priya Sharma"
+            op_code = c.operator.employee_code if c.operator else "EMP-9021"
+            op_id_val = c.operator_id or (c.operator.id if c.operator else "op_101")
+
             logs.append({
                 "session": c.id,
                 "date": c.created_at.strftime("%d-%b-%y"),
@@ -716,11 +779,14 @@ async def get_operator_logs(request):
                 "status": "RESOLVED",
                 "categories": c.issue_category.split(", ") if c.issue_category else [],
                 "recordingUrl": rec_url,
-                "flightNo": c.flight_number or ""
+                "flightNo": c.flight_number or "",
+                "operatorId": op_id_val,
+                "operatorName": op_name,
+                "operatorCode": op_code
             })
             
         db.close()
-        return JSONResponse({"success": True, "data": logs})
+        return JSONResponse({"success": True, "count": len(logs), "data": logs})
     except Exception as e:
         logger.error(f"Error fetching logs: {e}")
         return JSONResponse({"success": False, "message": str(e)}, status_code=500)

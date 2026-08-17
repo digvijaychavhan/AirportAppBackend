@@ -32,10 +32,14 @@ online_operators: Dict[str, Dict[str, Any]] = {}
 
 def get_operator_info(operator_id: str) -> Dict[str, str]:
     """
-    Resolves operator name and role from memory pool or sqlite database.
+    Resolves operator id, name and role from memory pool or sqlite database.
     """
+    if not operator_id:
+        return {"id": "op_101", "name": "Priya Sharma", "role": "Customer Support Executive"}
+        
     if operator_id in online_operators and online_operators[operator_id].get("name"):
         return {
+            "id": operator_id,
             "name": online_operators[operator_id]["name"],
             "role": online_operators[operator_id].get("roleName", "Customer Support Executive")
         }
@@ -43,16 +47,21 @@ def get_operator_info(operator_id: str) -> Dict[str, str]:
         from database import SessionLocal
         from models import Operator
         db = SessionLocal()
-        op = db.query(Operator).filter(Operator.id == operator_id).first()
+        op = db.query(Operator).filter(
+            (Operator.id == operator_id) |
+            (Operator.username == operator_id) |
+            (Operator.employee_code == operator_id) |
+            (Operator.name == operator_id)
+        ).first()
         if op:
             role_title = op.role.replace("_", " ").title() if op.role else "Customer Support Executive"
-            info = {"name": op.name, "role": role_title}
+            info = {"id": op.id, "name": op.name, "role": role_title}
             db.close()
             return info
         db.close()
     except Exception as e:
         logger.error(f"Error getting operator info: {e}")
-    return {"name": "Priya Sharma", "role": "Customer Support Executive"}
+    return {"id": operator_id, "name": operator_id, "role": "Customer Support Executive"}
 
 
 def get_longest_idle_available_operator(exclude_op_id: str = None) -> Any:
@@ -227,12 +236,10 @@ async def REGISTER_CLIENT(sid: str, data: Dict[str, Any]):
         name = data.get("name")
         role_name = data.get("roleName")
 
-        if not name or "Maya" in name:
+        if not name or not role_name:
             op_db_info = get_operator_info(client_id)
-            name = op_db_info.get("name", "Priya Sharma")
-            role_name = op_db_info.get("role", "Customer Support Executive")
-        elif not role_name:
-            role_name = "Customer Support Executive"
+            name = name or op_db_info.get("name", client_id)
+            role_name = role_name or op_db_info.get("role", "Customer Support Executive")
 
         if client_id in online_operators:
             online_operators[client_id]["sid"] = sid
@@ -563,7 +570,14 @@ def auto_save_support_call(call_id: str, session: Dict[str, Any], duration_secon
         kiosk_obj = db.query(Kiosk).filter((Kiosk.id == kiosk_id) | (Kiosk.code == kiosk_id)).first()
         kiosk_db_id = kiosk_obj.id if kiosk_obj else "T3-L1-K04"
         
-        op_id = (session or {}).get("operatorId") or "op_101"
+        raw_op_id = (session or {}).get("operatorId")
+        op_id = None
+        if raw_op_id:
+            op_match = db.query(Operator).filter(
+                (Operator.id == raw_op_id) | (Operator.username == raw_op_id) | (Operator.employee_code == raw_op_id)
+            ).first()
+            op_id = op_match.id if op_match else raw_op_id
+            
         passenger_name = (session or {}).get("passengerName") or "Luc Desmarais"
         flight_number = (session or {}).get("flightNumber") or "6E 203"
         pnr = (session or {}).get("pnr") or "ABC123"
@@ -571,6 +585,8 @@ def auto_save_support_call(call_id: str, session: Dict[str, Any], duration_secon
         if existing:
             existing.call_duration_seconds = max(1, duration_seconds) if duration_seconds > 0 else existing.call_duration_seconds
             existing.status = "ended"
+            if op_id:
+                existing.operator_id = op_id
             if not existing.passenger_name or existing.passenger_name == "Passenger":
                 existing.passenger_name = passenger_name
             if not existing.flight_number:
@@ -578,7 +594,7 @@ def auto_save_support_call(call_id: str, session: Dict[str, Any], duration_secon
             if rec_url and not existing.recording_url:
                 existing.recording_url = rec_url
             db.commit()
-            logger.info(f"Auto-save updated existing support call {call_id} (recording: {existing.recording_url})")
+            logger.info(f"Auto-save updated existing support call {call_id} (operator: {existing.operator_id}, recording: {existing.recording_url})")
         else:
             new_call = SupportCall(
                 id=call_id,
@@ -595,7 +611,7 @@ def auto_save_support_call(call_id: str, session: Dict[str, Any], duration_secon
             )
             db.add(new_call)
             db.commit()
-            logger.info(f"Auto-saved default support call record to DB: {call_id} (recording: {new_call.recording_url})")
+            logger.info(f"Auto-saved default support call record to DB: {call_id} (operator: {new_call.operator_id}, recording: {new_call.recording_url})")
         db.close()
     except Exception as e:
         logger.error(f"Error auto-saving support call {call_id}: {e}")
