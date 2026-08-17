@@ -575,6 +575,13 @@ async def submit_operator_log(request):
         pnr = body.get("pnr") or "ABC123"
 
         # Check if record already exists (auto-saved or previous draft)
+        rec_url = body.get("recordingUrl") or body.get("recording_url")
+        if not rec_url and session_id:
+            if os.path.exists(os.path.join(RECORDINGS_DIR, f"{session_id}.webm")):
+                rec_url = f"/recordings/{session_id}.webm"
+            elif os.path.exists(os.path.join(RECORDINGS_DIR, f"{session_id}.mp4")):
+                rec_url = f"/recordings/{session_id}.mp4"
+
         existing_call = db.query(SupportCall).filter(SupportCall.id == session_id).first() if session_id else None
         if existing_call:
             existing_call.kiosk_id = kiosk_db_id
@@ -591,13 +598,15 @@ async def submit_operator_log(request):
                 existing_call.flight_number = flight_no
             if pnr:
                 existing_call.pnr = pnr
+            if rec_url and not existing_call.recording_url:
+                existing_call.recording_url = rec_url
             existing_call.status = "ended"
             db.commit()
             support_call = existing_call
-            logger.info(f"Updated existing auto-saved support call in DB: {support_call.id}")
+            logger.info(f"Updated existing auto-saved support call in DB: {support_call.id} (recording: {support_call.recording_url})")
         else:
             support_call = SupportCall(
-                id=session_id if session_id and not ("demo" in session_id or "test" in session_id) else None,
+                id=session_id or None,
                 kiosk_id=kiosk_db_id,
                 operator_id=op_id,
                 status="ended",
@@ -606,11 +615,12 @@ async def submit_operator_log(request):
                 operator_notes=notes or "Assisted passenger at kiosk.",
                 passenger_name=passenger_name,
                 flight_number=flight_no,
-                pnr=pnr
+                pnr=pnr,
+                recording_url=rec_url
             )
             db.add(support_call)
             db.commit()
-            logger.info(f"Created new support call in DB: {support_call.id}")
+            logger.info(f"Created new support call in DB: {support_call.id} (recording: {support_call.recording_url})")
         
         res_data = {
             "session": support_call.id,
@@ -621,7 +631,8 @@ async def submit_operator_log(request):
             "duration": duration_str,
             "notes": support_call.operator_notes,
             "categories": categories,
-            "flightNo": support_call.flight_number
+            "flightNo": support_call.flight_number,
+            "recordingUrl": support_call.recording_url
         }
         db.close()
         return JSONResponse({"success": True, "message": "Log saved and updated successfully", "data": res_data})
@@ -686,6 +697,8 @@ async def get_operator_logs(request):
             duration_str = f"{minutes:02d}:{seconds:02d}"
             
             rec_url = c.recording_url
+            if rec_url and "/api/v1/recordings/" in rec_url:
+                rec_url = rec_url.replace("/api/v1/recordings/", "/recordings/")
             if not rec_url:
                 if os.path.exists(os.path.join(RECORDINGS_DIR, f"{c.id}.webm")):
                     rec_url = f"/recordings/{c.id}.webm"
@@ -750,6 +763,21 @@ async def upload_call_recording(request):
             call.recording_url = rel_url
             db.commit()
             logger.info(f"Attached recording {rel_url} to call {call_id}")
+        else:
+            new_call = SupportCall(
+                id=call_id,
+                kiosk_id="T3-L1-K04",
+                operator_id="op_101",
+                status="ended",
+                call_duration_seconds=1,
+                issue_category="General Inquiry",
+                operator_notes="Assisted passenger at kiosk.",
+                passenger_name="Passenger",
+                recording_url=rel_url
+            )
+            db.add(new_call)
+            db.commit()
+            logger.info(f"Created SupportCall with attached recording {rel_url} for call {call_id}")
         db.close()
         
         return JSONResponse({
@@ -762,6 +790,7 @@ async def upload_call_recording(request):
     except Exception as e:
         logger.error(f"Error uploading call recording for {call_id}: {e}")
         return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
 
 async def download_recording(request):
     call_id = request.path_params.get("call_id")

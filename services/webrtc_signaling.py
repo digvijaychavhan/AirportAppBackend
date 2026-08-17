@@ -549,6 +549,15 @@ def auto_save_support_call(call_id: str, session: Dict[str, Any], duration_secon
         from models import SupportCall, Kiosk
         db = SessionLocal()
         
+        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        recordings_dir = os.path.join(backend_dir, "recordings")
+        rec_url = (session or {}).get("recordingUrl")
+        if not rec_url:
+            if os.path.exists(os.path.join(recordings_dir, f"{call_id}.webm")):
+                rec_url = f"/recordings/{call_id}.webm"
+            elif os.path.exists(os.path.join(recordings_dir, f"{call_id}.mp4")):
+                rec_url = f"/recordings/{call_id}.mp4"
+
         existing = db.query(SupportCall).filter(SupportCall.id == call_id).first()
         kiosk_id = (session or {}).get("kioskId", "T3-L1-K04")
         kiosk_obj = db.query(Kiosk).filter((Kiosk.id == kiosk_id) | (Kiosk.code == kiosk_id)).first()
@@ -566,8 +575,10 @@ def auto_save_support_call(call_id: str, session: Dict[str, Any], duration_secon
                 existing.passenger_name = passenger_name
             if not existing.flight_number:
                 existing.flight_number = flight_number
+            if rec_url and not existing.recording_url:
+                existing.recording_url = rec_url
             db.commit()
-            logger.info(f"Auto-save updated existing support call {call_id}")
+            logger.info(f"Auto-save updated existing support call {call_id} (recording: {existing.recording_url})")
         else:
             new_call = SupportCall(
                 id=call_id,
@@ -579,11 +590,12 @@ def auto_save_support_call(call_id: str, session: Dict[str, Any], duration_secon
                 operator_notes="Assisted passenger at kiosk.",
                 passenger_name=passenger_name,
                 flight_number=flight_number,
-                pnr=pnr
+                pnr=pnr,
+                recording_url=rec_url
             )
             db.add(new_call)
             db.commit()
-            logger.info(f"Auto-saved default support call record to DB: {call_id}")
+            logger.info(f"Auto-saved default support call record to DB: {call_id} (recording: {new_call.recording_url})")
         db.close()
     except Exception as e:
         logger.error(f"Error auto-saving support call {call_id}: {e}")
