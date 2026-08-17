@@ -96,9 +96,9 @@ async def dispatch_call_to_operator(call_data: Dict[str, Any], target_op: Dict[s
     payload = {
         "callId": call_id,
         "kioskId": call_data.get("kioskId"),
-        "passengerName": call_data.get("passengerName", "Luc Desmarais"),
-        "flightNumber": call_data.get("flightNumber", "6E 203"),
-        "pnr": call_data.get("pnr", "ABC123"),
+        "passengerName": call_data.get("passengerName") or "",
+        "flightNumber": call_data.get("flightNumber") or "",
+        "pnr": call_data.get("pnr") or "",
         "ringStartTime": ring_start,
         "allocatedTo": target_op["operatorId"],
         "adaPriority": call_data.get("adaPriority", False)
@@ -310,9 +310,9 @@ async def CALL_REQUEST(sid: str, data: Dict[str, Any]):
     kiosk_id = data.get("kioskId", "Kiosk-01")
     ada_priority = data.get("adaPriority", False)
     language = data.get("language", "EN")
-    passenger_name = data.get("passengerName", "Luc Desmarais")
-    flight_number = data.get("flightNumber", "6E 203")
-    pnr = data.get("pnr", "ABC123")
+    passenger_name = data.get("passengerName") or ""
+    flight_number = data.get("flightNumber") or ""
+    pnr = data.get("pnr") or ""
     ring_start_time = datetime.utcnow().isoformat()
 
     # Remove any existing pending queued call for this kioskId to prevent duplicates
@@ -578,18 +578,18 @@ def auto_save_support_call(call_id: str, session: Dict[str, Any], duration_secon
             ).first()
             op_id = op_match.id if op_match else raw_op_id
             
-        passenger_name = (session or {}).get("passengerName") or "Luc Desmarais"
-        flight_number = (session or {}).get("flightNumber") or "6E 203"
-        pnr = (session or {}).get("pnr") or "ABC123"
+        passenger_name = (session or {}).get("passengerName") or ""
+        flight_number = (session or {}).get("flightNumber") or ""
+        pnr = (session or {}).get("pnr") or ""
         
         if existing:
             existing.call_duration_seconds = max(1, duration_seconds) if duration_seconds > 0 else existing.call_duration_seconds
             existing.status = "ended"
             if op_id:
                 existing.operator_id = op_id
-            if not existing.passenger_name or existing.passenger_name == "Passenger":
+            if passenger_name:
                 existing.passenger_name = passenger_name
-            if not existing.flight_number:
+            if flight_number:
                 existing.flight_number = flight_number
             if rec_url and not existing.recording_url:
                 existing.recording_url = rec_url

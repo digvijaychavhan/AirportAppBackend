@@ -516,7 +516,7 @@ async def get_call_details(request):
 
             data = {
                 "sessionId": call.id,
-                "passengerName": call.passenger_name or "Passenger",
+                "passengerName": call.passenger_name or "",
                 "flightNumber": call.flight_number or "",
                 "pnr": call.pnr or "",
                 "kioskId": kiosk_code,
@@ -542,7 +542,7 @@ async def get_call_details(request):
             "success": True,
             "data": {
                 "sessionId": call_id,
-                "passengerName": "Passenger",
+                "passengerName": "",
                 "recordingUrl": rec_file_url,
                 "status": "RESOLVED"
             }
@@ -579,7 +579,7 @@ async def submit_operator_log(request):
         categories = body.get("categories", [])
         categories_str = ", ".join(categories) if categories else None
         
-        passenger_name = f"{body.get('firstName', '')} {body.get('lastName', '')}".strip() or body.get("passengerName") or "Luc Desmarais"
+        passenger_name = f"{body.get('firstName', '')} {body.get('lastName', '')}".strip() or body.get("passengerName") or ""
         raw_op_id = body.get("operatorId") or body.get("operator_id")
         from models import Operator
         op_obj = db.query(Operator).filter(
@@ -588,7 +588,7 @@ async def submit_operator_log(request):
         op_id = op_obj.id if op_obj else (raw_op_id or "op_101")
         notes = body.get("notes", "")
         flight_no = body.get("flightNo") or body.get("flightNumber") or ""
-        pnr = body.get("pnr") or "ABC123"
+        pnr = body.get("pnr") or ""
 
         # Check if record already exists (auto-saved or previous draft)
         rec_url = body.get("recordingUrl") or body.get("recording_url")
@@ -608,12 +608,9 @@ async def submit_operator_log(request):
                 existing_call.issue_category = categories_str
             if notes:
                 existing_call.operator_notes = notes
-            if passenger_name and passenger_name != "Passenger":
-                existing_call.passenger_name = passenger_name
-            if flight_no:
-                existing_call.flight_number = flight_no
-            if pnr:
-                existing_call.pnr = pnr
+            existing_call.passenger_name = passenger_name
+            existing_call.flight_number = flight_no
+            existing_call.pnr = pnr
             if rec_url and not existing_call.recording_url:
                 existing_call.recording_url = rec_url
             existing_call.status = "ended"
@@ -773,7 +770,7 @@ async def get_operator_logs(request):
                 "date": c.created_at.strftime("%d-%b-%y"),
                 "time": c.created_at.strftime("%I:%M %p"),
                 "kiosk": kiosk_code,
-                "passenger": c.passenger_name or "Passenger",
+                "passenger": c.passenger_name or "",
                 "duration": duration_str,
                 "notes": c.operator_notes or "",
                 "status": "RESOLVED",
@@ -838,7 +835,7 @@ async def upload_call_recording(request):
                 call_duration_seconds=1,
                 issue_category="General Inquiry",
                 operator_notes="Assisted passenger at kiosk.",
-                passenger_name="Passenger",
+                passenger_name="",
                 recording_url=rel_url
             )
             db.add(new_call)
