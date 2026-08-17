@@ -121,6 +121,25 @@ async def check_and_dispatch_queued_calls():
                 break
 
 
+async def broadcast_admin_telemetry():
+    """
+    Broadcasts real-time telemetry snapshot to all connected admin clients.
+    """
+    try:
+        available_count = len([op for op in online_operators.values() if (op.get("status") or "").upper() == "AVAILABLE"])
+        busy_count = len([op for op in online_operators.values() if (op.get("status") or "").upper() in ["BUSY", "IN_CALL", "IN CALL"]])
+        payload = {
+            "online": available_count + busy_count,
+            "available": available_count,
+            "inCall": busy_count,
+            "total": len(online_operators)
+        }
+        await sio.emit("ADMIN_TELEMETRY_UPDATE", payload)
+        await sio.emit("OPERATORS_UPDATED", payload)
+    except Exception as e:
+        logger.error(f"Error broadcasting admin telemetry: {e}")
+
+
 @sio.event
 async def connect(sid: str, environ: Dict[str, Any]):
     logger.info(f"Socket connected: {sid}")
@@ -137,11 +156,16 @@ async def disconnect(sid: str):
         role = client_info.get("role")
 
         # If operator disconnected, update operator pool
-        if role == "operator" and client_id in online_operators:
-            # Check if this socket was the active one
-            if online_operators[client_id].get("sid") == sid:
+        if role == "operator":
+            if client_id and client_id in online_operators:
                 online_operators[client_id]["status"] = "OFFLINE"
+                online_operators[client_id]["sid"] = None
                 logger.info(f"Operator {client_id} marked OFFLINE due to socket disconnect")
+            for k, op_data in online_operators.items():
+                if op_data.get("sid") == sid:
+                    op_data["status"] = "OFFLINE"
+                    op_data["sid"] = None
+            await broadcast_admin_telemetry()
 
         # Remove any pending queued calls for this client and notify operators immediately
         removed_calls = [c for c in call_queue if c.get("kioskSid") == sid or (client_id and c.get("kioskId") == client_id)]
@@ -241,20 +265,24 @@ async def REGISTER_CLIENT(sid: str, data: Dict[str, Any]):
             name = name or op_db_info.get("name", client_id)
             role_name = role_name or op_db_info.get("role", "Customer Support Executive")
 
+        req_status = status.upper() if (status and status not in ["PRESERVE", "preserve"]) else None
+
         if client_id in online_operators:
             online_operators[client_id]["sid"] = sid
             online_operators[client_id]["name"] = name
             online_operators[client_id]["roleName"] = role_name
-            if status and status != "PRESERVE":
-                online_operators[client_id]["status"] = status
+            if req_status:
+                online_operators[client_id]["status"] = req_status
+            elif online_operators[client_id].get("status") == "OFFLINE":
+                online_operators[client_id]["status"] = "AVAILABLE"
+                online_operators[client_id]["availableSince"] = datetime.utcnow().timestamp()
         else:
-            initial_status = status if (status and status != "PRESERVE") else "AVAILABLE"
             online_operators[client_id] = {
                 "operatorId": client_id,
                 "sid": sid,
                 "name": name,
                 "roleName": role_name,
-                "status": initial_status,
+                "status": req_status or "AVAILABLE",
                 "availableSince": datetime.utcnow().timestamp(),
                 "currentCallId": None
             }
@@ -263,6 +291,7 @@ async def REGISTER_CLIENT(sid: str, data: Dict[str, Any]):
         await sio.emit("OPERATOR_STATE_SYNC", online_operators[client_id], room=sid)
         # Check if there are pending queued calls waiting for an operator
         await check_and_dispatch_queued_calls()
+        await broadcast_admin_telemetry()
 
     await sio.emit("REGISTERED_ACK", {"status": "REGISTERED", "role": role, "clientId": client_id}, room=sid)
 
@@ -273,28 +302,67 @@ async def OPERATOR_STATUS_UPDATE(sid: str, data: Dict[str, Any]):
     Operator toggles Online/Offline status.
     data = { "operatorId": "op_101", "status": "AVAILABLE" | "OFFLINE" }
     """
-    op_id = data.get("operatorId", "op_101")
-    status = data.get("status", "AVAILABLE")
+    client_info = connected_clients.get(sid, {})
+    raw_op_id = data.get("operatorId") or client_info.get("clientId") or "op_101"
+    status = (data.get("status") or "AVAILABLE").upper()
 
-    if op_id in online_operators:
-        online_operators[op_id]["status"] = status
-        online_operators[op_id]["sid"] = sid
+    # Match all related keys in online_operators (e.g. op_102, priya.sharma, sid)
+    target_keys = []
+    for k, v in list(online_operators.items()):
+        if k == raw_op_id or v.get("operatorId") == raw_op_id or v.get("sid") == sid:
+            target_keys.append(k)
+
+    if not target_keys:
+        op_db_info = get_operator_info(raw_op_id)
+        resolved_id = op_db_info.get("id", raw_op_id)
+        online_operators[resolved_id] = {
+            "operatorId": resolved_id,
+            "sid": sid,
+            "name": op_db_info.get("name", raw_op_id),
+            "roleName": op_db_info.get("role", "Customer Support Executive"),
+            "status": status,
+            "availableSince": datetime.utcnow().timestamp(),
+            "currentCallId": None
+        }
+        target_keys = [resolved_id]
+
+    for k in target_keys:
+        online_operators[k]["status"] = status
+        online_operators[k]["sid"] = sid
         if status == "AVAILABLE":
-            online_operators[op_id]["availableSince"] = datetime.utcnow().timestamp()
-            logger.info(f"Operator {op_id} is now ONLINE & AVAILABLE. Checking for waiting calls in queue...")
-            # Immediately dispatch waiting calls to this operator
-            await check_and_dispatch_queued_calls()
-        else:
-            logger.info(f"Operator {op_id} is now OFFLINE (DND). No calls will ring this operator.")
-            # Dismiss any ringing call currently displayed on this operator's screen
-            for call in call_queue:
-                if call.get("allocatedOperatorId") == op_id and call.get("status") == "QUEUED":
-                    call["allocatedOperatorId"] = None
-                    await sio.emit("INCOMING_CALL_DISMISSED", {"callId": call.get("callId")}, room=sid)
-            # Re-dispatch any waiting calls to another available operator if online
-            await check_and_dispatch_queued_calls()
+            online_operators[k]["availableSince"] = datetime.utcnow().timestamp()
 
-        await sio.emit("OPERATOR_STATE_SYNC", online_operators[op_id], room=sid)
+    # Sync status to database
+    try:
+        from database import SessionLocal
+        from models import Operator
+        db = SessionLocal()
+        for k in target_keys:
+            op_row = db.query(Operator).filter((Operator.id == k) | (Operator.username == k) | (Operator.employee_code == k)).first()
+            if op_row:
+                op_row.status = status.lower()
+        db.commit()
+        db.close()
+    except Exception as e:
+        logger.error(f"Error syncing operator status to DB: {e}")
+
+    if status == "AVAILABLE":
+        logger.info(f"Operator {raw_op_id} is now ONLINE & AVAILABLE. Checking for waiting calls in queue...")
+        await check_and_dispatch_queued_calls()
+    else:
+        logger.info(f"Operator {raw_op_id} is now OFFLINE (DND). No calls will ring this operator.")
+        # Dismiss any ringing call currently displayed on this operator's screen
+        for call in call_queue:
+            if call.get("allocatedOperatorId") in target_keys and call.get("status") == "QUEUED":
+                call["allocatedOperatorId"] = None
+                await sio.emit("INCOMING_CALL_DISMISSED", {"callId": call.get("callId")}, room=sid)
+        # Re-dispatch any waiting calls to another available operator if online
+        await check_and_dispatch_queued_calls()
+
+    if target_keys:
+        await sio.emit("OPERATOR_STATE_SYNC", online_operators[target_keys[0]], room=sid)
+
+    await broadcast_admin_telemetry()
 
 
 @sio.event

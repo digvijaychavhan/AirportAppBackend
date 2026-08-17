@@ -20,7 +20,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 from database import SessionLocal, Base, engine
 from models import Device, ScanLog, UserActionLog, Operator, Poi, WayfindingCategory
-from services.webrtc_signaling import online_operators
+from services.webrtc_signaling import online_operators, connected_clients
 
 logger = logging.getLogger("admin_routes")
 
@@ -145,10 +145,18 @@ async def get_admin_overview(request):
         total_devices = db.query(Device).count()
         
         total_operators = db.query(Operator).count()
-        # Count available operators from live signaling pool or DB
-        online_operators_count = len([op for op in online_operators.values() if op.get("status") == "AVAILABLE"])
-        if online_operators_count == 0:
-            online_operators_count = db.query(Operator).filter(Operator.status == "available").count()
+        # Count live active operators logged into system (AVAILABLE or BUSY / In a call)
+        available_count = 0
+        busy_count = 0
+
+        for op_id, op_state in list(online_operators.items()):
+            st = (op_state.get("status") or "").upper()
+            if st == "AVAILABLE":
+                available_count += 1
+            elif st in ["BUSY", "IN_CALL", "IN CALL"]:
+                busy_count += 1
+
+        online_operators_count = available_count + busy_count
 
         # Scan stats
         total_scans = db.query(ScanLog).count()
@@ -172,7 +180,9 @@ async def get_admin_overview(request):
                 },
                 "operators": {
                     "total": total_operators,
-                    "online": online_operators_count
+                    "online": online_operators_count,
+                    "available": available_count,
+                    "inCall": busy_count
                 },
                 "scans": {
                     "total": total_scans,
@@ -346,9 +356,14 @@ async def get_operators(request):
         data = []
         for op in ops:
             # Check if live state is in memory pool
-            live_status = op.status
+            live_status = "offline"
             if op.id in online_operators:
-                live_status = online_operators[op.id].get("status", op.status).lower()
+                op_mem = online_operators[op.id]
+                st = (op_mem.get("status") or "").lower()
+                if st in ["available", "busy"]:
+                    live_status = st
+                else:
+                    live_status = "offline"
 
             uname = op.username or (op.name.lower().strip().replace(" ", ".") if op.name else op.employee_code.lower())
             data.append({
@@ -523,6 +538,29 @@ async def operator_login(request):
 
         role_title = op.role.replace("_", " ").title() if op.role else "Customer Support Executive"
         uname = op.username or (op.name.lower().strip().replace(" ", ".") if op.name else op.employee_code.lower())
+        
+        # Mark operator as active/available in live signaling pool
+        if op.id in online_operators:
+            online_operators[op.id]["name"] = op.name
+            online_operators[op.id]["roleName"] = role_title
+            online_operators[op.id]["status"] = "AVAILABLE"
+            online_operators[op.id]["availableSince"] = datetime.utcnow().timestamp()
+            online_operators[op.id]["lastLogin"] = datetime.utcnow().timestamp()
+        else:
+            online_operators[op.id] = {
+                "operatorId": op.id,
+                "name": op.name,
+                "roleName": role_title,
+                "status": "AVAILABLE",
+                "availableSince": datetime.utcnow().timestamp(),
+                "lastLogin": datetime.utcnow().timestamp(),
+                "currentCallId": None,
+                "sid": None
+            }
+
+        op.status = "available"
+        db.commit()
+
         data = {
             "id": op.id,
             "operatorId": op.id,
@@ -530,7 +568,7 @@ async def operator_login(request):
             "employeeCode": op.employee_code,
             "name": op.name,
             "role": role_title,
-            "status": op.status or "available",
+            "status": "available",
             "supportedLanguages": op.supported_languages,
             "shift": op.shift
         }
