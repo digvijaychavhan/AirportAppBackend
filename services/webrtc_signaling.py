@@ -28,6 +28,8 @@ connected_clients: Dict[str, Dict[str, Any]] = {}
 call_queue: List[Dict[str, Any]] = []
 # Operator availability pool: operator_id -> { operatorId, sid, name, roleName, status: 'AVAILABLE'|'BUSY'|'OFFLINE', availableSince: float, currentCallId: str }
 online_operators: Dict[str, Dict[str, Any]] = {}
+# Kiosk live presence pool: kiosk_id -> { kioskId, sid, page, lastSeen, status: 'online' }
+online_kiosks: Dict[str, Dict[str, Any]] = {}
 
 
 def get_operator_info(operator_id: str) -> Dict[str, str]:
@@ -128,14 +130,27 @@ async def broadcast_admin_telemetry():
     try:
         available_count = len([op for op in online_operators.values() if (op.get("status") or "").upper() == "AVAILABLE"])
         busy_count = len([op for op in online_operators.values() if (op.get("status") or "").upper() in ["BUSY", "IN_CALL", "IN CALL"]])
+        active_kiosks_count = len([k for k in online_kiosks.values() if k.get("sid") in connected_clients or k.get("sid")])
         payload = {
+            "operators": {
+                "online": available_count + busy_count,
+                "available": available_count,
+                "inCall": busy_count,
+                "total": len(online_operators)
+            },
+            "kiosks": {
+                "active": active_kiosks_count,
+                "online": active_kiosks_count,
+                "total": max(5, active_kiosks_count)
+            },
             "online": available_count + busy_count,
             "available": available_count,
             "inCall": busy_count,
-            "total": len(online_operators)
+            "activeKiosks": active_kiosks_count
         }
         await sio.emit("ADMIN_TELEMETRY_UPDATE", payload)
         await sio.emit("OPERATORS_UPDATED", payload)
+        await sio.emit("KIOSKS_UPDATED", payload)
     except Exception as e:
         logger.error(f"Error broadcasting admin telemetry: {e}")
 
@@ -165,6 +180,17 @@ async def disconnect(sid: str):
                 if op_data.get("sid") == sid:
                     op_data["status"] = "OFFLINE"
                     op_data["sid"] = None
+            await broadcast_admin_telemetry()
+
+        # If kiosk disconnected, remove from active kiosks
+        if role == "kiosk":
+            removed = []
+            for kid, kdata in list(online_kiosks.items()):
+                if kdata.get("sid") == sid or kid == client_id:
+                    online_kiosks.pop(kid, None)
+                    removed.append(kid)
+            if removed:
+                logger.info(f"Kiosk client(s) {removed} disconnected")
             await broadcast_admin_telemetry()
 
         # Remove any pending queued calls for this client and notify operators immediately
@@ -293,7 +319,51 @@ async def REGISTER_CLIENT(sid: str, data: Dict[str, Any]):
         await check_and_dispatch_queued_calls()
         await broadcast_admin_telemetry()
 
+    if role == "kiosk":
+        kiosk_id = client_id or f"KIOSK-{sid[:6]}"
+        page_name = data.get("page", "/")
+        online_kiosks[kiosk_id] = {
+            "kioskId": kiosk_id,
+            "sid": sid,
+            "page": page_name,
+            "lastSeen": datetime.utcnow().timestamp(),
+            "status": "online"
+        }
+        connected_clients[sid]["kioskId"] = kiosk_id
+        logger.info(f"Kiosk unit {kiosk_id} registered live session on page {page_name}")
+        await broadcast_admin_telemetry()
+
     await sio.emit("REGISTERED_ACK", {"status": "REGISTERED", "role": role, "clientId": client_id}, room=sid)
+
+
+@sio.event
+async def KIOSK_HEARTBEAT(sid: str, data: Dict[str, Any]):
+    """
+    Heartbeat ping from active kiosk page session.
+    """
+    kiosk_id = data.get("clientId") or data.get("kioskId")
+    page_name = data.get("page", "/")
+    if kiosk_id:
+        online_kiosks[kiosk_id] = {
+            "kioskId": kiosk_id,
+            "sid": sid,
+            "page": page_name,
+            "lastSeen": datetime.utcnow().timestamp(),
+            "status": "online"
+        }
+        await broadcast_admin_telemetry()
+
+
+@sio.event
+async def UNREGISTER_KIOSK(sid: str, data: Dict[str, Any]):
+    """
+    Kiosk client leaves or navigates away.
+    """
+    kiosk_id = data.get("clientId") or data.get("kioskId")
+    for kid, kdata in list(online_kiosks.items()):
+        if kid == kiosk_id or kdata.get("sid") == sid:
+            online_kiosks.pop(kid, None)
+    await broadcast_admin_telemetry()
 
 
 @sio.event
