@@ -980,23 +980,63 @@ async def scan_passport_for_wifi(request):
 
 
 async def get_baggage_belts(request):
-    belts = [
-        {"id": "belt_4", "carousel": "Carousel 4", "flightNumber": "6E 203", "airline": "IndiGo", "origin": "Chennai (MAA)", "status": "DELIVERING", "location": "Terminal 2 · Arrival Hall Level 1"},
-        {"id": "belt_9", "carousel": "Carousel 9", "flightNumber": "AI 101", "airline": "Air India", "origin": "London (LHR)", "status": "FIRST_BAG", "location": "Terminal 3 · International Arrival"},
-        {"id": "belt_2", "carousel": "Carousel 2", "flightNumber": "SG 812", "airline": "SpiceJet", "origin": "Mumbai (BOM)", "status": "DELAYED", "location": "Terminal 1 · Domestic Arrival"}
-    ]
+    belts = []
+    for idx, f in enumerate(FLIGHT_DATABASE):
+        belt_name = f.get("baggageBelt") or f"Carousel {idx + 1}"
+        belts.append({
+            "id": f"belt_{f.get('id', idx)}",
+            "carousel": belt_name,
+            "flightNumber": f.get("flightNumber"),
+            "airline": f.get("airline", {}).get("name", "Airline"),
+            "origin": f"{f.get('destinationName', 'Domestic')} ({f.get('destination', 'DEL')})",
+            "status": "DELIVERING" if f.get("status") == "ON TIME" else "FIRST_BAG" if f.get("status") == "BOARDING" else "DELAYED",
+            "location": f"{f.get('terminal', 'Terminal 3')} · Arrival Hall Level 1"
+        })
     return JSONResponse({"success": True, "data": belts})
 
 async def get_directory_pois(request):
     try:
-        category = request.query_params.get("category", "").strip()
+        raw_cat = request.query_params.get("category", "").strip()
         from database import SessionLocal
         from models import Poi
+        from sqlalchemy import or_
         db = SessionLocal()
         
-        query = db.query(Poi)
-        if category:
-            query = query.filter(Poi.category.ilike(category))
+        logger.info(f"[get_directory_pois] raw_cat='{raw_cat}', db_url='{db.bind.url}', total_pois_in_db={db.query(Poi).count()}")
+        
+        query = db.query(Poi).filter(Poi.is_active == True)
+        if raw_cat:
+            cat_lower = raw_cat.lower()
+            if cat_lower in ["amenity", "amenities", "facility", "facilities"]:
+                query = query.filter(or_(
+                    Poi.category.ilike("Amenities"),
+                    Poi.category.ilike("Amenity"),
+                    Poi.category.ilike("Restroom"),
+                    Poi.category.ilike("Facilities")
+                ))
+            elif cat_lower in ["service", "services", "info", "information"]:
+                query = query.filter(or_(
+                    Poi.category.ilike("Services"),
+                    Poi.category.ilike("Service"),
+                    Poi.category.ilike("Information")
+                ))
+            elif cat_lower in ["retail", "shopping", "store", "shops"]:
+                query = query.filter(or_(
+                    Poi.category.ilike("Retail"),
+                    Poi.category.ilike("Shopping")
+                ))
+            elif cat_lower in ["dining", "food", "eat & dine", "restaurant", "cafe"]:
+                query = query.filter(or_(
+                    Poi.category.ilike("Dining"),
+                    Poi.category.ilike("Restaurant"),
+                    Poi.category.ilike("eat-dine")
+                ))
+            elif cat_lower in ["lounge", "lounges"]:
+                query = query.filter(Poi.category.ilike("Lounge"))
+            elif cat_lower in ["gate", "gates"]:
+                query = query.filter(Poi.category.ilike("Gate"))
+            else:
+                query = query.filter(Poi.category.ilike(f"%{raw_cat}%"))
             
         pois = query.all()
         
@@ -1009,8 +1049,8 @@ async def get_directory_pois(request):
             "description": p.description or "",
             "isOpen": True,
             "hours": p.operating_hours or "24 Hours",
-            "terminal": p.terminal or "",
-            "floor": p.floor_name or "",
+            "terminal": p.terminal or "Terminal 3",
+            "floor": p.floor_name or "Level 1",
             "gate": p.gate or "",
             "distanceM": p.distance_m or 100,
             "image": p.image_url or "",
@@ -1020,7 +1060,7 @@ async def get_directory_pois(request):
         } for p in pois]
         
         db.close()
-        return JSONResponse({"success": True, "data": data})
+        return JSONResponse({"success": True, "count": len(data), "data": data})
     except Exception as e:
         logger.error(f"Error fetching directory pois: {e}")
         return JSONResponse({"success": False, "message": str(e)}, status_code=500)

@@ -56,6 +56,7 @@ def migrate_admin_schema():
                 if "created_at" not in op_cols:
                     conn.execute(text("ALTER TABLE operators ADD COLUMN created_at DATETIME;"))
                 conn.execute(text("UPDATE operators SET username = LOWER(REPLACE(name, ' ', '.')) WHERE username IS NULL OR username = '';"))
+                conn.execute(text("UPDATE operators SET status = 'available' WHERE LOWER(status) IN ('available', 'online');"))
                 conn.commit()
     except Exception as e:
         logger.warning(f"Admin schema migration notice: {e}")
@@ -137,18 +138,21 @@ seed_admin_defaults()
 # ----------------------------------------------------------------------
 async def get_admin_overview(request):
     try:
+        from sqlalchemy import func
         db = SessionLocal()
         
-        # Counts
+        # Device & Kiosk Counts
         total_kiosks = db.query(Device).filter(Device.device_type == "kiosk").count()
         online_kiosks = db.query(Device).filter(Device.device_type == "kiosk", Device.status == "online").count()
         total_devices = db.query(Device).count()
+        online_devices = db.query(Device).filter(Device.status == "online").count()
         
+        # Operators Count
         total_operators = db.query(Operator).count()
-        # Count available operators from live signaling pool or DB
-        online_operators_count = len([op for op in online_operators.values() if op.get("status") == "AVAILABLE"])
+        signaling_online = [op for op in online_operators.values() if str(op.get("status", "")).upper() in ("AVAILABLE", "ONLINE")]
+        online_operators_count = len(signaling_online)
         if online_operators_count == 0:
-            online_operators_count = db.query(Operator).filter(Operator.status == "available").count()
+            online_operators_count = db.query(Operator).filter(func.lower(Operator.status).in_(["available", "online"])).count()
 
         # Scan stats
         total_scans = db.query(ScanLog).count()
@@ -182,7 +186,7 @@ async def get_admin_overview(request):
                 },
                 "devices": {
                     "total": total_devices,
-                    "online": online_kiosks + 2
+                    "online": online_devices
                 },
                 "amenities": {
                     "total": total_amenities
