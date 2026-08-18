@@ -7,4 +7,5 @@ pydantic-settings
 networkx
 groq
 python-dotenv
-cors
+httpx
+pytest
