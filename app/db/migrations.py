@@ -90,6 +90,17 @@ def run_migrations():
             except Exception as e:
                 logger.warning(f"Notice on pois migration: {e}")
 
+            # Wayfinding Categories column migrations
+            try:
+                cat_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(wayfinding_categories);")).fetchall()]
+                if cat_cols:
+                    if "subcategories_json" not in cat_cols:
+                        conn.execute(text("ALTER TABLE wayfinding_categories ADD COLUMN subcategories_json TEXT;"))
+                        logger.info("Database migration: added subcategories_json to wayfinding_categories")
+                    conn.commit()
+            except Exception as e:
+                logger.warning(f"Notice on wayfinding_categories migration: {e}")
+
         logger.info("Database schema migration verification completed.")
     except Exception as e:
         logger.error(f"Error during migration execution: {e}")

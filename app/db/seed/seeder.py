@@ -84,6 +84,13 @@ def seed_database(force: bool = False):
             categories = [models.WayfindingCategory(**c) for c in get_seed_categories()]
             db.add_all(categories)
             db.commit()
+        else:
+            # Backfill any missing subcategories_json
+            for seed_cat in get_seed_categories():
+                existing = db.query(models.WayfindingCategory).filter(models.WayfindingCategory.id == seed_cat["id"]).first()
+                if existing and not existing.subcategories_json:
+                    existing.subcategories_json = seed_cat.get("subcategories_json")
+                    db.commit()
 
         if db.query(models.Poi).count() == 0:
             logger.info("Seeding POIs...")

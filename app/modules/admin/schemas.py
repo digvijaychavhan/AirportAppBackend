@@ -105,6 +105,8 @@ class CategoryPayload(BaseModel):
     icon_color: Optional[str] = Field("#2563EB", alias="iconColor")
     icon_bg: Optional[str] = Field("#DBEAFE", alias="iconBg")
     route: str
+    subcategories: Optional[List[Dict[str, Any]]] = None
+    subcategories_json: Optional[str] = Field(None, alias="subcategoriesJson")
     is_active: Optional[bool] = Field(True, alias="isActive")
 
     class Config:

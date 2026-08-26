@@ -54,20 +54,69 @@ async def get_airport_pois(
     return {"success": True, "count": len(pois), "data": pois}
 
 
+@router.get("/api/v1/wayfinding/categories")
+async def get_public_wayfinding_categories(db: Session = Depends(get_db)):
+    """
+    Fetches active wayfinding categories with their subcategories for kiosk display.
+    """
+    try:
+        import json
+        categories = db.query(models.WayfindingCategory).filter(models.WayfindingCategory.is_active == True).all()
+        data = []
+        for c in categories:
+            subcats = []
+            if c.subcategories_json:
+                try:
+                    subcats = json.loads(c.subcategories_json)
+                except Exception:
+                    subcats = []
+            data.append({
+                "id": c.id,
+                "title": c.title,
+                "description": c.description,
+                "photo": c.photo_url or "",
+                "icon": c.icon,
+                "iconColor": c.icon_color,
+                "iconBg": c.icon_bg,
+                "route": c.route,
+                "subcategories": subcats,
+                "isActive": c.is_active
+            })
+        return {"success": True, "count": len(data), "data": data}
+    except Exception as e:
+        logger.error(f"Error fetching wayfinding categories: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/api/v1/directory")
 async def get_directory_pois(
-    category: Optional[str] = Query(None, description="Category filter (e.g. eat-dine, shopping, lounge)"),
+    category: Optional[str] = Query(None, description="Category filter (e.g. dining, shopping, lounges, services, amenities, gates)"),
     db: Session = Depends(get_db)
 ):
     """
-    Fetches categorized directory points of interest from SQL database.
+    Fetches active categorized directory points of interest from SQL database with category alias matching.
     """
     try:
-        query = db.query(models.Poi)
+        query = db.query(models.Poi).filter(models.Poi.is_active == True)
         if category and category.strip():
-            query = query.filter(models.Poi.category.ilike(category.strip()))
+            raw_cat = category.strip().lower()
+            # Category alias resolution
+            alias_map = {
+                "eat-dine": ["eat-dine", "dining", "food", "restaurant"],
+                "dining": ["eat-dine", "dining", "food", "restaurant"],
+                "shopping": ["shopping", "retail", "shop"],
+                "retail": ["shopping", "retail", "shop"],
+                "lounges": ["lounges", "lounge"],
+                "lounge": ["lounges", "lounge"],
+                "services": ["services", "service"],
+                "amenities": ["amenities", "amenity", "facility"],
+                "gates": ["gates", "gate"]
+            }
+            match_cats = alias_map.get(raw_cat, [raw_cat])
+            from sqlalchemy import or_
+            query = query.filter(or_(*[models.Poi.category.ilike(f"%{c}%") for c in match_cats]))
 
-        pois = query.all()
+        pois = query.order_by(models.Poi.name).all()
 
         data = [{
             "id": p.id,
@@ -85,7 +134,8 @@ async def get_directory_pois(
             "image": p.image_url or "",
             "badge": p.badge_label or "",
             "badgeVariant": p.badge_variant or "purple",
-            "filter": p.sub_category.split(",") if p.sub_category else []
+            "rating": p.rating or 4.5,
+            "filter": [s.strip() for s in p.sub_category.split(",")] if p.sub_category else []
         } for p in pois]
 
         return {"success": True, "data": data}

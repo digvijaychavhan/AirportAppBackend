@@ -589,8 +589,8 @@ async def create_or_update_amenity(
 
         if poi:
             poi.name = payload.name
-            poi.category = payload.category
-            poi.sub_category = payload.sub_category
+            poi.category = payload.category.lower().strip()
+            poi.sub_category = (payload.sub_category or "").strip()
             poi.description = payload.description
             poi.terminal = payload.terminal or poi.terminal
             poi.floor_name = payload.floor_name or poi.floor_name
@@ -606,10 +606,13 @@ async def create_or_update_amenity(
             if payload.is_active is not None:
                 poi.is_active = payload.is_active
         else:
+            import uuid
+            poi_id = payload.id if payload.id and payload.id.strip() else f"poi_{uuid.uuid4().hex[:8]}"
             poi = models.Poi(
+                id=poi_id,
                 name=payload.name,
-                category=payload.category,
-                sub_category=payload.sub_category,
+                category=payload.category.lower().strip(),
+                sub_category=(payload.sub_category or "").strip(),
                 description=payload.description,
                 terminal=payload.terminal or "Terminal 3",
                 floor_name=payload.floor_name or "Level 1",
@@ -625,7 +628,14 @@ async def create_or_update_amenity(
             db.add(poi)
 
         db.commit()
-        return {"success": True, "message": "Amenity saved successfully"}
+
+        # Real-time synchronization broadcast to kiosks
+        try:
+            await sio.emit("DIRECTORY_UPDATED", {"type": "poi", "action": "save", "id": poi.id, "category": payload.category})
+        except Exception:
+            pass
+
+        return {"success": True, "message": "Amenity saved successfully", "data": {"id": poi.id}}
     except Exception as e:
         db.rollback()
         logger.error(f"Error saving amenity: {e}")
@@ -641,6 +651,12 @@ async def toggle_amenity_status(poi_id: str, db: Session = Depends(get_db)):
 
         poi.is_active = not (poi.is_active if poi.is_active is not None else True)
         db.commit()
+
+        try:
+            await sio.emit("DIRECTORY_UPDATED", {"type": "poi", "action": "toggle", "id": poi.id, "isActive": poi.is_active})
+        except Exception:
+            pass
+
         return {"success": True, "id": poi.id, "isActive": poi.is_active}
     except HTTPException:
         raise
@@ -657,6 +673,12 @@ async def delete_amenity(poi_id: str, db: Session = Depends(get_db)):
             raise HTTPException(status_code=404, detail="Amenity not found")
         db.delete(poi)
         db.commit()
+
+        try:
+            await sio.emit("DIRECTORY_UPDATED", {"type": "poi", "action": "delete", "id": poi_id})
+        except Exception:
+            pass
+
         return {"success": True, "message": "Amenity deleted successfully"}
     except HTTPException:
         raise
@@ -666,23 +688,32 @@ async def delete_amenity(poi_id: str, db: Session = Depends(get_db)):
 
 
 # ----------------------------------------------------------------------
-# 6. WAYFINDING CATEGORIES CRUD
+# 6. WAYFINDING CATEGORIES & SUBCATEGORIES CRUD
 # ----------------------------------------------------------------------
 @router.get("/api/v1/admin/wayfinding/categories")
 async def get_wayfinding_categories(db: Session = Depends(get_db)):
     try:
         categories = db.query(models.WayfindingCategory).all()
-        data = [{
-            "id": c.id,
-            "title": c.title,
-            "description": c.description,
-            "photoUrl": c.photo_url,
-            "icon": c.icon,
-            "iconColor": c.icon_color,
-            "iconBg": c.icon_bg,
-            "route": c.route,
-            "isActive": c.is_active
-        } for c in categories]
+        data = []
+        for c in categories:
+            subcats = []
+            if c.subcategories_json:
+                try:
+                    subcats = json.loads(c.subcategories_json)
+                except Exception:
+                    subcats = []
+            data.append({
+                "id": c.id,
+                "title": c.title,
+                "description": c.description,
+                "photoUrl": c.photo_url,
+                "icon": c.icon,
+                "iconColor": c.icon_color,
+                "iconBg": c.icon_bg,
+                "route": c.route,
+                "subcategories": subcats,
+                "isActive": c.is_active
+            })
         return {"success": True, "count": len(data), "data": data}
     except Exception as e:
         logger.error(f"Error fetching categories: {e}")
@@ -699,6 +730,12 @@ async def create_or_update_category(
         if payload.id:
             cat = db.query(models.WayfindingCategory).filter(models.WayfindingCategory.id == payload.id).first()
 
+        subcats_str = None
+        if payload.subcategories is not None:
+            subcats_str = json.dumps(payload.subcategories)
+        elif payload.subcategories_json:
+            subcats_str = payload.subcategories_json
+
         if cat:
             cat.title = payload.title
             cat.description = payload.description
@@ -707,10 +744,13 @@ async def create_or_update_category(
             cat.icon_color = payload.icon_color or cat.icon_color
             cat.icon_bg = payload.icon_bg or cat.icon_bg
             cat.route = payload.route
-            cat.is_active = payload.is_active if payload.is_active is not None else True
+            if subcats_str is not None:
+                cat.subcategories_json = subcats_str
+            if payload.is_active is not None:
+                cat.is_active = payload.is_active
         else:
             cat = models.WayfindingCategory(
-                id=payload.id,
+                id=payload.id or payload.title.lower().replace(" ", "-"),
                 title=payload.title,
                 description=payload.description,
                 photo_url=payload.photo_url,
@@ -718,11 +758,18 @@ async def create_or_update_category(
                 icon_color=payload.icon_color or "#2563EB",
                 icon_bg=payload.icon_bg or "#DBEAFE",
                 route=payload.route,
+                subcategories_json=subcats_str,
                 is_active=payload.is_active if payload.is_active is not None else True
             )
             db.add(cat)
 
         db.commit()
+
+        try:
+            await sio.emit("DIRECTORY_UPDATED", {"type": "category", "action": "save", "id": cat.id})
+        except Exception:
+            pass
+
         return {"success": True, "message": "Category saved successfully"}
     except Exception as e:
         db.rollback()
@@ -738,6 +785,12 @@ async def delete_category(cat_id: str, db: Session = Depends(get_db)):
             raise HTTPException(status_code=404, detail="Category not found")
         db.delete(cat)
         db.commit()
+
+        try:
+            await sio.emit("DIRECTORY_UPDATED", {"type": "category", "action": "delete", "id": cat_id})
+        except Exception:
+            pass
+
         return {"success": True, "message": "Category deleted successfully"}
     except HTTPException:
         raise

@@ -89,4 +89,5 @@ class WayfindingCategory(Base):
     icon_color = Column(String, nullable=False, default="#2563EB")
     icon_bg = Column(String, nullable=False, default="#DBEAFE")
     route = Column(String, nullable=False)
+    subcategories_json = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
