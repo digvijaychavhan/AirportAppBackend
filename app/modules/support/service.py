@@ -702,3 +702,88 @@ async def SCREEN_ANNOTATION_STROKE(sid: str, data: Dict[str, Any]):
     call_id = data.get("callId")
     room_name = f"call_{call_id}"
     await sio.emit("SCREEN_ANNOTATION_STROKE", data, room=room_name, skip_sid=sid)
+
+
+# --- Live Remote Screen Control & Input Streaming Events ---
+
+@sio.event
+async def REMOTE_CONTROL_REQUEST(sid: str, data: Dict[str, Any]):
+    """Operator requests or triggers remote screen control on caller's kiosk.
+    NOTE: Part of Remote Control Module — do not modify without testing remote access flow."""
+    call_id = data.get("callId")
+    operator_id = data.get("operatorId")
+    operator_name = data.get("operatorName", "Operator")
+    if call_id:
+        room_name = f"call_{call_id}"
+        if call_id in active_calls:
+            active_calls[call_id]["remoteControlActive"] = True
+            active_calls[call_id]["remoteControlOperator"] = operator_name
+        logger.info(f"[RemoteControl] Request initiated for call {call_id} by {operator_name}")
+        await sio.emit("REMOTE_CONTROL_START", {
+            "callId": call_id,
+            "operatorId": operator_id,
+            "operatorName": operator_name,
+            "timestamp": datetime.utcnow().isoformat()
+        }, room=room_name, skip_sid=sid)
+
+
+@sio.event
+async def REMOTE_CONTROL_STOP(sid: str, data: Dict[str, Any]):
+    """Operator or Kiosk stops / pauses remote screen control.
+    NOTE: Part of Remote Control Module — do not modify without testing remote access flow."""
+    call_id = data.get("callId")
+    stopped_by = data.get("stoppedBy", "operator")
+    if call_id:
+        room_name = f"call_{call_id}"
+        if call_id in active_calls:
+            active_calls[call_id]["remoteControlActive"] = False
+        logger.info(f"[RemoteControl] Stopped for call {call_id} by {stopped_by}")
+        await sio.emit("REMOTE_CONTROL_STOPPED", {
+            "callId": call_id,
+            "stoppedBy": stopped_by,
+            "timestamp": datetime.utcnow().isoformat()
+        }, room=room_name, skip_sid=sid)
+
+
+@sio.event
+async def REMOTE_CONTROL_EVENT(sid: str, data: Dict[str, Any]):
+    """Relays real-time mouse movements, clicks, keys, typing, and scroll events.
+    NOTE: Part of Remote Control Module — do not modify without testing remote access flow."""
+    call_id = data.get("callId")
+    if call_id:
+        room_name = f"call_{call_id}"
+        await sio.emit("REMOTE_CONTROL_EVENT", data, room=room_name, skip_sid=sid)
+
+
+@sio.event
+async def REMOTE_SCREEN_OFFER(sid: str, data: Dict[str, Any]):
+    """WebRTC offer for dedicated HD screen stream.
+    NOTE: Part of Remote Control Module — do not modify without testing remote access flow."""
+    call_id = data.get("callId")
+    sdp = data.get("sdp")
+    if call_id:
+        room_name = f"call_{call_id}"
+        await sio.emit("REMOTE_SCREEN_OFFER", {"callId": call_id, "sdp": sdp}, room=room_name, skip_sid=sid)
+
+
+@sio.event
+async def REMOTE_SCREEN_ANSWER(sid: str, data: Dict[str, Any]):
+    """WebRTC answer for dedicated HD screen stream.
+    NOTE: Part of Remote Control Module — do not modify without testing remote access flow."""
+    call_id = data.get("callId")
+    sdp = data.get("sdp")
+    if call_id:
+        room_name = f"call_{call_id}"
+        await sio.emit("REMOTE_SCREEN_ANSWER", {"callId": call_id, "sdp": sdp}, room=room_name, skip_sid=sid)
+
+
+@sio.event
+async def REMOTE_SCREEN_ICE(sid: str, data: Dict[str, Any]):
+    """ICE candidate for dedicated HD screen stream.
+    NOTE: Part of Remote Control Module — do not modify without testing remote access flow."""
+    call_id = data.get("callId")
+    candidate = data.get("candidate")
+    if call_id:
+        room_name = f"call_{call_id}"
+        await sio.emit("REMOTE_SCREEN_ICE", {"callId": call_id, "candidate": candidate}, room=room_name, skip_sid=sid)
+
