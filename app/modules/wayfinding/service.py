@@ -11,28 +11,6 @@ from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger("pathfinding_service")
 
-AIRPORT_POIS: List[Dict[str, Any]] = [
-    {"id": "poi_coffee", "name": "Third Wave Coffee", "category": "dining", "floor": "L1", "x": 350.0, "y": 450.0, "description": "Artisanal Coffee & Fresh Pastries", "is_poi": True},
-    {"id": "poi_mcdonalds", "name": "McDonald's", "category": "dining", "floor": "L1", "x": 420.0, "y": 400.0, "description": "Fast Food & Desserts", "is_poi": True},
-    {"id": "poi_subway", "name": "Subway", "category": "dining", "floor": "L1", "x": 450.0, "y": 410.0, "description": "Fresh Made-to-Order Subs", "is_poi": True},
-    {"id": "poi_bikanervala", "name": "Bikanervala", "category": "dining", "floor": "L1", "x": 480.0, "y": 390.0, "description": "Indian Sweets & Express Meals", "is_poi": True},
-    {"id": "poi_duty_free", "name": "Duty Free", "category": "shopping", "floor": "L1", "x": 300.0, "y": 320.0, "description": "International Perfumes & Liquors", "is_poi": True},
-    {"id": "poi_imagine", "name": "Imagine Store", "category": "shopping", "floor": "L1", "x": 360.0, "y": 300.0, "description": "Apple Authorized Reseller", "is_poi": True},
-    {"id": "poi_relay_books", "name": "Relay Books", "category": "shopping", "floor": "L1", "x": 400.0, "y": 280.0, "description": "Books, Magazines & Travel Goods", "is_poi": True},
-    {"id": "poi_med_center", "name": "Medical Centre", "category": "services", "floor": "L1", "x": 150.0, "y": 420.0, "description": "24/7 First Aid & Medical Services", "is_poi": True},
-    {"id": "poi_pharmacy", "name": "Pharmacy", "category": "services", "floor": "L1", "x": 180.0, "y": 410.0, "description": "Apollo Pharmacy & Express Medicine", "is_poi": True},
-    {"id": "poi_baggage", "name": "Baggage Services", "category": "services", "floor": "L1", "x": 220.0, "y": 550.0, "description": "Baggage wrap & lost property", "is_poi": True},
-    {"id": "poi_currency", "name": "Currency Exchange", "category": "services", "floor": "L1", "x": 280.0, "y": 520.0, "description": "Thomas Cook Forex", "is_poi": True},
-    {"id": "poi_encalm", "name": "Encalm Lounge", "category": "lounges", "floor": "L2", "x": 350.0, "y": 120.0, "description": "VIP Lounge with Buffet & Spa", "is_poi": True},
-    {"id": "poi_plaza_lounge", "name": "Plaza Premium Lounge", "category": "lounges", "floor": "L2", "x": 420.0, "y": 110.0, "description": "Premium Passenger Lounge", "is_poi": True},
-    {"id": "poi_air_india", "name": "Air India Maharaja Lounge", "category": "lounges", "floor": "L2", "x": 500.0, "y": 100.0, "description": "Exclusive Business Class Lounge", "is_poi": True},
-    {"id": "node_gate_20", "name": "Gate 20", "category": "gates", "floor": "L1", "x": 600.0, "y": 200.0, "description": "Boarding Gate 20", "is_poi": True},
-    {"id": "node_gate_25", "name": "Gate 25", "category": "gates", "floor": "L1", "x": 700.0, "y": 200.0, "description": "Boarding Gate 25", "is_poi": True},
-    {"id": "node_gate_30", "name": "Gate 30", "category": "gates", "floor": "L2", "x": 650.0, "y": 100.0, "description": "Boarding Gate 30", "is_poi": True},
-    {"id": "node_gate_37", "name": "Gate 37", "category": "gates", "floor": "L2", "x": 780.0, "y": 100.0, "description": "Boarding Gate 37", "is_poi": True},
-    {"id": "poi_restroom_l1", "name": "Restrooms L1", "category": "amenities", "floor": "L1", "x": 200.0, "y": 350.0, "description": "Accessible Restrooms & Baby Care", "is_poi": True},
-]
-
 def compute_indoor_route(
     origin_node_id: str,
     destination_poi_id: str,
@@ -154,7 +132,18 @@ class PathfindingEngine:
         return compute_indoor_route(origin_node_id, destination_poi_id, accessibility_mode, multi_stops)
 
     def get_pois(self, category: Optional[str] = None, floor: Optional[str] = None) -> List[Dict[str, Any]]:
-        results = AIRPORT_POIS
+        from app.db.seed.data.pois_categories import get_seed_pois
+        raw_pois = get_seed_pois()
+        results = [{
+            "id": p["id"],
+            "name": p["name"],
+            "category": p.get("category", ""),
+            "floor": p.get("floor_name", "L1"),
+            "x": p.get("x_coord", 350.0),
+            "y": p.get("y_coord", 450.0),
+            "description": p.get("description", ""),
+            "is_poi": True
+        } for p in raw_pois]
         if category:
             results = [p for p in results if p.get("category", "").lower() == category.lower()]
         if floor:

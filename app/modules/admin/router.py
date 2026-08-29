@@ -797,3 +797,26 @@ async def delete_category(cat_id: str, db: Session = Depends(get_db)):
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ----------------------------------------------------------------------
+# 9. DATABASE SEED REFRESH
+# ----------------------------------------------------------------------
+@router.post("/api/v1/admin/database/refresh-seeds")
+@router.get("/api/v1/admin/database/refresh-seeds")
+async def refresh_database_seeds():
+    """
+    Forces an immediate re-sync of all seed categories, POIs, map nodes, airlines, and flights.
+    Broadcasts DIRECTORY_UPDATED over WebSocket so all clients immediately re-render.
+    """
+    try:
+        from app.db.seed.seeder import seed_database
+        seed_database(force=False)
+        try:
+            await sio.emit("DIRECTORY_UPDATED", {"type": "all", "action": "refresh"})
+        except Exception:
+            pass
+        return {"success": True, "message": "Database seeds refreshed successfully"}
+    except Exception as e:
+        logger.error(f"Error refreshing database seeds: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
