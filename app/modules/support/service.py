@@ -561,7 +561,16 @@ async def OPERATOR_ACCEPT_CALL(sid: str, data: Dict[str, Any]):
     if kiosk_sid:
         await sio.enter_room(kiosk_sid, room_name)
 
+    claimed_payload = {
+        "callId": call_id,
+        "operatorId": operator_id,
+        "operatorName": op_name,
+        "kioskId": call_session.get("kioskId", "T3-L1-K04")
+    }
+    await sio.emit("SUPPORT_CALL_CLAIMED", claimed_payload, room="operators")
+    await sio.emit("CALL_CLAIMED", claimed_payload, room="operators")
     await sio.emit("INCOMING_CALL_DISMISSED", {"callId": call_id}, room="operators")
+    await broadcast_admin_telemetry()
 
     accept_payload = {
         "callId": call_id,
@@ -572,6 +581,7 @@ async def OPERATOR_ACCEPT_CALL(sid: str, data: Dict[str, Any]):
         "status": "ACCEPTED"
     }
     await sio.emit("CALL_ACCEPTED", accept_payload, room=room_name)
+
 
 
 @sio.event

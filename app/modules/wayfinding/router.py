@@ -54,6 +54,46 @@ async def get_airport_pois(
     return {"success": True, "count": len(pois), "data": pois}
 
 
+@router.get("/api/v1/wayfinding/poi/{poi_id}")
+async def get_poi_by_id(poi_id: str, db: Session = Depends(get_db)):
+    """
+    Retrieves a single POI by its ID, slug, or matching name from the database.
+    """
+    try:
+        from sqlalchemy import or_
+        clean_id = poi_id.strip()
+        poi = db.query(models.Poi).filter(
+            or_(
+                models.Poi.id == clean_id,
+                models.Poi.id.ilike(clean_id),
+                models.Poi.name.ilike(clean_id),
+                models.Poi.name.ilike(f"%{clean_id}%")
+            )
+        ).first()
+
+        if poi:
+            return {
+                "success": True,
+                "data": {
+                    "id": poi.id,
+                    "name": poi.name,
+                    "category": poi.category,
+                    "subCategory": poi.sub_category or "",
+                    "description": poi.description or "",
+                    "terminal": poi.terminal or "Terminal 3",
+                    "floor": poi.floor_name or "Level 1",
+                    "gate": poi.gate or "",
+                    "hours": poi.operating_hours or "24 Hours",
+                    "image": poi.image_url or ""
+                }
+            }
+        return {"success": False, "message": "POI not found"}
+    except Exception as e:
+        logger.error(f"Error fetching POI {poi_id}: {e}")
+        return {"success": False, "message": str(e)}
+
+
+
 @router.get("/api/v1/wayfinding/categories")
 async def get_public_wayfinding_categories(db: Session = Depends(get_db)):
     """
