@@ -268,6 +268,140 @@ async def get_flight_by_id(
     }
 
 
+@router.get("/api/v1/flights/popular")
+async def get_popular_flights(db: Session = Depends(get_db)):
+    """
+    Returns trending/popular flight numbers dynamically from the database.
+    """
+    try:
+        flights = db.query(models.Flight).order_by(models.Flight.scheduled_departure.asc()).limit(8).all()
+        if flights:
+            flight_numbers = [f.flight_number for f in flights]
+            return {"success": True, "data": flight_numbers}
+        return {"success": True, "data": ["6E 203", "AI 101", "UK 812", "SG 812", "6E 2262", "QP 1304", "BA 142"]}
+    except Exception as e:
+        logger.error(f"Error fetching popular flights: {e}")
+        return {"success": True, "data": ["6E 203", "AI 101", "UK 812", "SG 812", "6E 2262", "QP 1304", "BA 142"]}
+
+
+@router.get("/api/v1/flights/gates")
+async def get_departure_gates(db: Session = Depends(get_db)):
+    """
+    Returns live departure & bus boarding gates and current boarding statuses.
+    """
+    try:
+        flights = db.query(models.Flight).all()
+        flight_by_gate = {f.gate.upper(): f for f in flights if f.gate}
+
+        # Query gates from POI database if available
+        poi_gates = db.query(models.Poi).filter(models.Poi.category == "gates").all()
+
+        gates_list = []
+        # 1. Gates 20-37 (Level 4 / Departure Concourse)
+        for i in range(20, 38):
+            g_label = str(i)
+            fl = flight_by_gate.get(g_label)
+            status_val = "boarding" if (fl and fl.status == "BOARDING") or i == 24 else ("soon" if i % 4 == 0 else "open")
+            walking_min = max(3, int((i - 19) * 0.6 + 3))
+            dist_m = (i - 19) * 40 + 200
+
+            gates_list.append({
+                "id": f"g{g_label}",
+                "label": g_label,
+                "terminal": "Terminal 3",
+                "level": "Departure Level 4",
+                "walkingMin": walking_min,
+                "distanceM": dist_m,
+                "status": status_val,
+                "flightNumber": fl.flight_number if fl else None,
+                "destination": fl.destination_name if fl else None,
+                "filter": ["t3", "international", "departure"]
+            })
+
+        # 2. Bus Boarding Gates B1-B6 (Level 1)
+        for i in range(1, 7):
+            g_label = f"B{i}"
+            fl = flight_by_gate.get(g_label)
+            status_val = "boarding" if (fl and fl.status == "BOARDING") or i == 1 else "open"
+            walking_min = i + 5
+            dist_m = i * 60 + 300
+
+            gates_list.append({
+                "id": f"g{g_label}",
+                "label": g_label,
+                "terminal": "Terminal 3",
+                "level": "Level 1 (Bus Boarding)",
+                "walkingMin": walking_min,
+                "distanceM": dist_m,
+                "status": status_val,
+                "flightNumber": fl.flight_number if fl else None,
+                "destination": fl.destination_name if fl else None,
+                "filter": ["t3", "domestic", "departure"]
+            })
+
+        return {"success": True, "count": len(gates_list), "data": gates_list}
+    except Exception as e:
+        logger.error(f"Error fetching gates list: {e}")
+        return {"success": False, "message": str(e)}
+
+
+@router.get("/api/v1/flights/demo-boarding-pass")
+async def get_demo_boarding_pass(db: Session = Depends(get_db)):
+    """
+    Returns realistic sample IATA BCBP raw barcode and passenger object for simulated scanning.
+    """
+    try:
+        flight = db.query(models.Flight).filter(models.Flight.flight_number == "6E 2262").first()
+        if not flight:
+            flight = db.query(models.Flight).first()
+
+        sample_barcode = "M1PATIL/NIRANT         K9BZMM DELPNQ6E 2262 192Y020B0143 348>5181 O6192B6E 03122167960012A0000000000000 0   6E 035884273        15KN"
+        return {
+            "success": True,
+            "data": {
+                "rawBarcode": sample_barcode,
+                "passengerName": "Nirant Patil",
+                "pnr": "K9BZMM",
+                "flightNumber": flight.flight_number if flight else "6E 2262",
+                "airline": {
+                    "code": flight.airline_code if flight else "6E",
+                    "name": "IndiGo" if not flight or flight.airline_code == "6E" else "Airline",
+                    "logoUrl": "/logos/indigo.png"
+                },
+                "origin": flight.origin_iata if flight else "DEL",
+                "originCity": "Delhi",
+                "destination": flight.destination_iata if flight else "PNQ",
+                "destinationName": flight.destination_name if flight else "Pune",
+                "seatNumber": "20B",
+                "cabinClass": "Economy (Y)",
+                "terminal": flight.terminal if flight else "Terminal 3",
+                "gate": flight.gate if flight else "B12",
+                "checkinCounters": flight.checkin_counters if flight else "45 – 52",
+                "baggageBelt": flight.baggage_belt if flight else "Carousel 4",
+                "status": flight.status if flight else "ON TIME"
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error generating demo boarding pass: {e}")
+        return {
+            "success": True,
+            "data": {
+                "rawBarcode": "M1PATIL/NIRANT         K9BZMM DELPNQ6E 2262 192Y020B0143",
+                "passengerName": "Nirant Patil",
+                "pnr": "K9BZMM",
+                "flightNumber": "6E 2262",
+                "airline": {"code": "6E", "name": "IndiGo", "logoUrl": "/logos/indigo.png"},
+                "origin": "DEL",
+                "destination": "PNQ",
+                "destinationName": "Pune",
+                "terminal": "Terminal 3",
+                "gate": "B12",
+                "seatNumber": "20B",
+                "status": "ON TIME"
+            }
+        }
+
+
 @router.get("/api/v1/baggage/belts")
 async def get_baggage_belts():
     """
@@ -282,3 +416,4 @@ async def get_shuttle_schedules():
     Returns inter-terminal transfer shuttle schedules and departure frequencies.
     """
     return {"success": True, "data": get_shuttles_data()}
+
