@@ -3,7 +3,7 @@ Device Fleet, Scan Logs & User Action Audit ORM Models
 """
 
 from datetime import datetime
-from sqlalchemy import Column, String, Integer, DateTime, Text
+from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, Text
 from app.core.database import Base
 from app.db.base import generate_uuid
 
@@ -20,12 +20,26 @@ class Device(Base):
     floor_name = Column(String, default="Level 1")
     location = Column(String, default="Near Gate B12")
     status = Column(String, default="online")  # online, warning, offline
-    ping_ms = Column(Integer, default=12)
-    cpu_pct = Column(Integer, default=24)
-    ram_pct = Column(Integer, default=48)
-    screen_status = Column(String, default="OK")
+    
+    # Hardware Diagnostics
+    scanner_connected = Column(Boolean, default=True)
+    scanner_working = Column(String, default="OK")  # OK, ERROR, DISCONNECTED
     scanner_status = Column(String, default="OK")
+    
+    camera_connected = Column(Boolean, default=True)
+    camera_working = Column(String, default="OK")  # OK, ERROR, DISCONNECTED
     camera_status = Column(String, default="OK")
+    
+    screen_status = Column(String, default="OK")
+    
+    # System Resources & Network
+    cpu_pct = Column(Float, default=18.0)
+    ram_used_mb = Column(Float, default=2048.0)
+    ram_total_mb = Column(Float, default=8192.0)
+    ram_pct = Column(Float, default=25.0)
+    network_bandwidth_mbps = Column(Float, default=100.0)
+    ping_ms = Column(Integer, default=12)
+    
     last_heartbeat = Column(DateTime, default=datetime.utcnow)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -50,9 +64,12 @@ class UserActionLog(Base):
     __tablename__ = "user_action_logs"
 
     id = Column(String, primary_key=True, default=generate_uuid)
-    kiosk_id = Column(String, index=True, nullable=False)
+    kiosk_id = Column(String, index=True, nullable=False, default="T3-L1-K04")
+    username = Column(String, index=True, nullable=True)  # Passenger name / username if logged in; None for Guest
     session_id = Column(String, nullable=True)
-    action_type = Column(String, index=True, nullable=False)
+    action_type = Column(String, index=True, nullable=False, default="CLICK")  # CLICK, PAGE_VIEW, SCAN, SEARCH, NAVIGATION
+    target_element = Column(String, nullable=True)  # Button label, link, chip name, etc.
+    route = Column(String, nullable=True)  # Current route e.g. /eat-dine, /wayfinding/shopping
     details = Column(String, nullable=True)
     metadata_json = Column(Text, nullable=True)
     ip_address = Column(String, nullable=True)

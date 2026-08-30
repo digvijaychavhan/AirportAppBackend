@@ -65,11 +65,40 @@ class ScanLogCreatePayload(BaseModel):
 
 class UserActionLogCreatePayload(BaseModel):
     kiosk_id: Optional[str] = Field("T3-L1-K04", alias="kioskId")
+    username: Optional[str] = None  # Logged-in passenger name / username; None for Guest
     session_id: Optional[str] = Field(None, alias="sessionId")
-    action_type: str = Field(..., alias="actionType")
+    action_type: str = Field("CLICK", alias="actionType")  # CLICK, PAGE_VIEW, SCAN, SEARCH, NAVIGATION
+    target_element: Optional[str] = Field(None, alias="targetElement")
+    route: Optional[str] = None
     details: Optional[str] = None
     metadata_json: Optional[Any] = Field(None, alias="metadata")
     ip_address: Optional[str] = Field(None, alias="ipAddress")
+    created_at: Optional[datetime] = Field(None, alias="createdAt")
+
+    class Config:
+        populate_by_name = True
+
+class BatchUserActionsPayload(BaseModel):
+    kiosk_id: Optional[str] = Field("T3-L1-K04", alias="kioskId")
+    actions: List[UserActionLogCreatePayload] = []
+
+    class Config:
+        populate_by_name = True
+
+class KioskTelemetryHeartbeatPayload(BaseModel):
+    kiosk_id: str = Field("T3-L1-K04", alias="kioskId")
+    scanner_connected: bool = Field(True, alias="scannerConnected")
+    scanner_working: str = Field("OK", alias="scannerWorking")  # OK, ERROR, DISCONNECTED
+    camera_connected: bool = Field(True, alias="cameraConnected")
+    camera_working: str = Field("OK", alias="cameraWorking")  # OK, ERROR, DISCONNECTED
+    network_bandwidth_mbps: float = Field(100.0, alias="networkBandwidthMbps")
+    cpu_pct: float = Field(18.0, alias="cpuPct")
+    ram_used_mb: float = Field(2048.0, alias="ramUsedMb")
+    ram_total_mb: float = Field(8192.0, alias="ramTotalMb")
+    ram_pct: float = Field(25.0, alias="ramPct")
+    ping_ms: Optional[int] = Field(12, alias="pingMs")
+    ip_address: Optional[str] = Field(None, alias="ipAddress")
+    status: Optional[str] = "online"
 
     class Config:
         populate_by_name = True

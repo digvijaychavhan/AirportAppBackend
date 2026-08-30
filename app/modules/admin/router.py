@@ -29,6 +29,8 @@ from app.modules.admin.schemas import (
     DevicePayload,
     ScanLogCreatePayload,
     UserActionLogCreatePayload,
+    BatchUserActionsPayload,
+    KioskTelemetryHeartbeatPayload,
     AmenityPayload,
     CategoryPayload
 )
@@ -132,38 +134,134 @@ async def get_network_health():
 
 
 # ----------------------------------------------------------------------
-# 2. CONNECTED DEVICES FLEET HEALTHCHECK
+# 2. CONNECTED DEVICES FLEET HEALTHCHECK & TELEMETRY
 # ----------------------------------------------------------------------
 @router.get("/api/v1/admin/devices")
 async def get_devices(db: Session = Depends(get_db)):
     try:
         devices = db.query(models.Device).order_by(models.Device.device_id).all()
         active_kiosks_count = len([k for k in online_kiosks.values() if k.get("sid") in connected_clients or k.get("sid")])
+        now = datetime.utcnow()
 
-        data = [{
-            "id": d.id,
-            "deviceId": d.device_id,
-            "name": d.name,
-            "deviceType": d.device_type,
-            "ipAddress": d.ip_address,
-            "macAddress": d.mac_address,
-            "terminal": d.terminal,
-            "floorName": d.floor_name,
-            "location": d.location,
-            "status": "online" if (d.device_id in online_kiosks or (active_kiosks_count > 0 and d.device_id == "KIOSK-T3-L1-04")) else d.status,
-            "pingMs": d.ping_ms,
-            "cpuPct": d.cpu_pct,
-            "ramPct": d.ram_pct,
-            "screenStatus": d.screen_status,
-            "scannerStatus": d.scanner_status,
-            "cameraStatus": d.camera_status,
-            "lastHeartbeat": d.last_heartbeat.isoformat() if d.last_heartbeat else None,
-            "createdAt": d.created_at.isoformat() if d.created_at else None
-        } for d in devices]
+        data = []
+        for d in devices:
+            # Determine if active recently (< 2 mins)
+            is_recent = d.last_heartbeat and (now - d.last_heartbeat).total_seconds() < 120
+            is_online = is_recent or (d.device_id in online_kiosks) or (active_kiosks_count > 0 and d.device_id == "KIOSK-T3-L1-04")
+
+            data.append({
+                "id": d.id,
+                "deviceId": d.device_id,
+                "name": d.name,
+                "deviceType": d.device_type,
+                "ipAddress": d.ip_address,
+                "macAddress": d.mac_address,
+                "terminal": d.terminal,
+                "floorName": d.floor_name,
+                "location": d.location,
+                "status": "online" if is_online else (d.status or "offline"),
+                "pingMs": d.ping_ms or 12,
+                "cpuPct": round(d.cpu_pct or 18.0, 1),
+                "ramUsedMb": round(d.ram_used_mb or 2048.0, 1),
+                "ramTotalMb": round(d.ram_total_mb or 8192.0, 1),
+                "ramPct": round(d.ram_pct or 25.0, 1),
+                "networkBandwidthMbps": round(d.network_bandwidth_mbps or 100.0, 1),
+                "scannerConnected": bool(d.scanner_connected),
+                "scannerWorking": d.scanner_working or d.scanner_status or "OK",
+                "scannerStatus": d.scanner_status or "OK",
+                "cameraConnected": bool(d.camera_connected),
+                "cameraWorking": d.camera_working or d.camera_status or "OK",
+                "cameraStatus": d.camera_status or "OK",
+                "screenStatus": d.screen_status or "OK",
+                "lastHeartbeat": d.last_heartbeat.isoformat() if d.last_heartbeat else None,
+                "createdAt": d.created_at.isoformat() if d.created_at else None
+            })
 
         return {"success": True, "count": len(data), "data": data}
     except Exception as e:
         logger.error(f"Error fetching devices: {e}")
+        raise HTTPException(status_code=500, detail={"success": False, "message": str(e)})
+
+
+@router.post("/api/v1/admin/telemetry/heartbeat")
+@router.post("/api/v1/telemetry/heartbeat")
+@router.post("/api/v1/kiosks/telemetry")
+async def record_telemetry_heartbeat(
+    payload: KioskTelemetryHeartbeatPayload,
+    db: Session = Depends(get_db)
+):
+    try:
+        kiosk_id = payload.kiosk_id or "T3-L1-K04"
+        dev = db.query(models.Device).filter(
+            (models.Device.device_id == kiosk_id) | 
+            (models.Device.id == kiosk_id) |
+            (models.Device.device_id == f"KIOSK-{kiosk_id}")
+        ).first()
+
+        now = datetime.utcnow()
+        if not dev:
+            # Auto-register device if first time reporting
+            dev = models.Device(
+                device_id=kiosk_id,
+                name=f"Kiosk {kiosk_id}",
+                device_type="kiosk",
+                ip_address=payload.ip_address or "192.168.1.104",
+                terminal="Terminal 3",
+                floor_name="Level 1",
+                location="Main Entrance E1",
+                status="online"
+            )
+            db.add(dev)
+
+        # Update telemetry statistics
+        dev.scanner_connected = payload.scanner_connected
+        dev.scanner_working = payload.scanner_working
+        dev.scanner_status = payload.scanner_working
+        dev.camera_connected = payload.camera_connected
+        dev.camera_working = payload.camera_working
+        dev.camera_status = payload.camera_working
+        dev.cpu_pct = payload.cpu_pct
+        dev.ram_used_mb = payload.ram_used_mb
+        dev.ram_total_mb = payload.ram_total_mb
+        dev.ram_pct = payload.ram_pct
+        dev.network_bandwidth_mbps = payload.network_bandwidth_mbps
+        if payload.ping_ms is not None:
+            dev.ping_ms = payload.ping_ms
+        if payload.ip_address:
+            dev.ip_address = payload.ip_address
+        dev.status = "online"
+        dev.last_heartbeat = now
+        db.commit()
+
+        # Emit live telemetry broadcast via Socket.IO
+        device_data = {
+            "deviceId": dev.device_id,
+            "status": "online",
+            "cpuPct": dev.cpu_pct,
+            "ramPct": dev.ram_pct,
+            "ramUsedMb": dev.ram_used_mb,
+            "ramTotalMb": dev.ram_total_mb,
+            "networkBandwidthMbps": dev.network_bandwidth_mbps,
+            "scannerConnected": dev.scanner_connected,
+            "scannerWorking": dev.scanner_working,
+            "cameraConnected": dev.camera_connected,
+            "cameraWorking": dev.camera_working,
+            "pingMs": dev.ping_ms,
+            "lastHeartbeat": now.isoformat()
+        }
+        try:
+            import asyncio
+            if asyncio.iscoroutinefunction(sio.emit):
+                asyncio.create_task(sio.emit("ADMIN_TELEMETRY_UPDATED", device_data))
+            else:
+                sio.emit("ADMIN_TELEMETRY_UPDATED", device_data)
+        except Exception as ws_err:
+            logger.debug(f"Socket.IO emit warning: {ws_err}")
+
+        return {"success": True, "message": "Telemetry heartbeat recorded", "data": device_data}
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error recording telemetry heartbeat: {e}")
         raise HTTPException(status_code=500, detail={"success": False, "message": str(e)})
 
 
@@ -500,14 +598,36 @@ async def create_scan_log(
 
 
 @router.get("/api/v1/admin/actions")
-async def get_user_action_logs(db: Session = Depends(get_db)):
+@router.get("/api/v1/telemetry/actions")
+async def get_user_action_logs(
+    username: Optional[str] = None,
+    kiosk_id: Optional[str] = None,
+    action_type: Optional[str] = None,
+    limit: int = Query(250, ge=1, le=1000),
+    db: Session = Depends(get_db)
+):
     try:
-        actions = db.query(models.UserActionLog).order_by(models.UserActionLog.created_at.desc()).limit(200).all()
+        query = db.query(models.UserActionLog)
+        if username:
+            if username.lower() == "guest":
+                query = query.filter((models.UserActionLog.username == None) | (models.UserActionLog.username == "Guest"))
+            else:
+                query = query.filter(models.UserActionLog.username.ilike(f"%{username}%"))
+        if kiosk_id:
+            query = query.filter(models.UserActionLog.kiosk_id == kiosk_id)
+        if action_type:
+            query = query.filter(models.UserActionLog.action_type.ilike(f"%{action_type}%"))
+
+        actions = query.order_by(models.UserActionLog.created_at.desc()).limit(limit).all()
         data = [{
             "id": a.id,
             "kioskId": a.kiosk_id,
+            "username": a.username or "Guest",
+            "isLoggedIn": bool(a.username and a.username != "Guest"),
             "sessionId": a.session_id,
             "actionType": a.action_type,
+            "targetElement": a.target_element,
+            "route": a.route,
             "details": a.details,
             "metadata": json.loads(a.metadata_json) if a.metadata_json else {},
             "ipAddress": a.ip_address,
@@ -520,6 +640,7 @@ async def get_user_action_logs(db: Session = Depends(get_db)):
 
 
 @router.post("/api/v1/admin/actions/log")
+@router.post("/api/v1/telemetry/actions/log")
 async def create_user_action_log(
     payload: UserActionLogCreatePayload,
     db: Session = Depends(get_db)
@@ -528,18 +649,102 @@ async def create_user_action_log(
         meta_str = json.dumps(payload.metadata_json) if payload.metadata_json else None
         action = models.UserActionLog(
             kiosk_id=payload.kiosk_id or "T3-L1-K04",
+            username=payload.username if payload.username and payload.username.strip() != "Guest" else None,
             session_id=payload.session_id,
-            action_type=payload.action_type,
+            action_type=payload.action_type or "CLICK",
+            target_element=payload.target_element,
+            route=payload.route,
             details=payload.details,
             metadata_json=meta_str,
-            ip_address=payload.ip_address
+            ip_address=payload.ip_address,
+            created_at=payload.created_at or datetime.utcnow()
         )
         db.add(action)
         db.commit()
-        return {"success": True, "id": action.id}
+
+        # Emit live action to admin via Socket.IO
+        action_data = {
+            "id": action.id,
+            "kioskId": action.kiosk_id,
+            "username": action.username or "Guest",
+            "isLoggedIn": bool(action.username and action.username != "Guest"),
+            "actionType": action.action_type,
+            "targetElement": action.target_element,
+            "route": action.route,
+            "details": action.details,
+            "createdAt": action.created_at.isoformat() if action.created_at else None
+        }
+        try:
+            import asyncio
+            if asyncio.iscoroutinefunction(sio.emit):
+                asyncio.create_task(sio.emit("ADMIN_USER_ACTION_LOGGED", action_data))
+            else:
+                sio.emit("ADMIN_USER_ACTION_LOGGED", action_data)
+        except Exception as ws_err:
+            logger.debug(f"Socket.IO emit warning: {ws_err}")
+
+        return {"success": True, "id": action.id, "data": action_data}
     except Exception as e:
         db.rollback()
         logger.error(f"Error logging action: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/v1/admin/actions/batch")
+@router.post("/api/v1/telemetry/actions")
+async def batch_user_actions(
+    payload: BatchUserActionsPayload,
+    db: Session = Depends(get_db)
+):
+    try:
+        kiosk_id = payload.kiosk_id or "T3-L1-K04"
+        created_count = 0
+        latest_action_data = None
+
+        for item in payload.actions:
+            meta_str = json.dumps(item.metadata_json) if item.metadata_json else None
+            action = models.UserActionLog(
+                kiosk_id=item.kiosk_id or kiosk_id,
+                username=item.username if item.username and item.username.strip() != "Guest" else None,
+                session_id=item.session_id,
+                action_type=item.action_type or "CLICK",
+                target_element=item.target_element,
+                route=item.route,
+                details=item.details,
+                metadata_json=meta_str,
+                ip_address=item.ip_address,
+                created_at=item.created_at or datetime.utcnow()
+            )
+            db.add(action)
+            created_count += 1
+            latest_action_data = {
+                "id": action.id,
+                "kioskId": action.kiosk_id,
+                "username": action.username or "Guest",
+                "isLoggedIn": bool(action.username and action.username != "Guest"),
+                "actionType": action.action_type,
+                "targetElement": action.target_element,
+                "route": action.route,
+                "details": action.details,
+                "createdAt": action.created_at.isoformat() if action.created_at else None
+            }
+
+        db.commit()
+
+        if latest_action_data:
+            try:
+                import asyncio
+                if asyncio.iscoroutinefunction(sio.emit):
+                    asyncio.create_task(sio.emit("ADMIN_USER_ACTION_LOGGED", latest_action_data))
+                else:
+                    sio.emit("ADMIN_USER_ACTION_LOGGED", latest_action_data)
+            except Exception as ws_err:
+                logger.debug(f"Socket.IO emit warning: {ws_err}")
+
+        return {"success": True, "count": created_count, "message": f"Batched {created_count} actions recorded"}
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error batch logging actions: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

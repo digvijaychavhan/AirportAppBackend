@@ -135,8 +135,11 @@ def get_seed_user_action_logs():
     return [
         {
             "kiosk_id": "T3-L1-K04",
+            "username": "Luc Desmarais",
             "session_id": "sess_1001",
             "action_type": "SCAN_BOARDING_PASS",
+            "target_element": "Camera Scanner Viewfinder",
+            "route": "/flights",
             "details": "Scanned boarding pass for flight 6E 203 (Luc Desmarais)",
             "metadata_json": json.dumps({"flight": "6E 203", "pnr": "ABC123", "result": "SUCCESS"}),
             "ip_address": "192.168.1.104",
@@ -144,29 +147,50 @@ def get_seed_user_action_logs():
         },
         {
             "kiosk_id": "T3-L1-K04",
+            "username": "Luc Desmarais",
             "session_id": "sess_1001",
             "action_type": "WAYFINDING_SEARCH",
-            "details": "Searched route from Kiosk to Gate B12 (Mode: Elevator)",
-            "metadata_json": json.dumps({"origin": "kiosk_t3_l1", "destination": "node_gate_b12", "mode": "elevator"}),
+            "target_element": "Option: Elevator",
+            "route": "/directions",
+            "details": "Selected route from Kiosk to Bikanervala via Elevator",
+            "metadata_json": json.dumps({"origin": "kiosk", "destination": "bikanervala", "mode": "elevator"}),
             "ip_address": "192.168.1.104",
             "created_at": now - timedelta(minutes=3)
         },
         {
             "kiosk_id": "T3-L1-K04",
+            "username": "Luc Desmarais",
             "session_id": "sess_1001",
-            "action_type": "VIEW_MAP",
-            "details": "Switched floor view to Level 2 (International Concourse)",
-            "metadata_json": json.dumps({"floor": "L2"}),
+            "action_type": "CLICK",
+            "target_element": "Button: L2 Departures",
+            "route": "/map",
+            "details": "Switched map floor view to Level 2 (Departures)",
+            "metadata_json": json.dumps({"floor": 2}),
             "ip_address": "192.168.1.104",
             "created_at": now - timedelta(minutes=2)
         },
         {
             "kiosk_id": "T3-L1-K04",
+            "username": None,  # Guest user
+            "session_id": "sess_1002",
+            "action_type": "CLICK",
+            "target_element": "Card: Shopping & Duty Free",
+            "route": "/wayfinding",
+            "details": "Guest browsed Shopping directory",
+            "metadata_json": json.dumps({"category": "shopping"}),
+            "ip_address": "192.168.1.104",
+            "created_at": now - timedelta(minutes=1)
+        },
+        {
+            "kiosk_id": "T3-L1-K04",
+            "username": "Luc Desmarais",
             "session_id": "sess_1001",
             "action_type": "START_VIDEO_CALL",
+            "target_element": "Button: Connect Live Operator",
+            "route": "/support",
             "details": "Initiated video call with customer support (Call ID: call_demo_101)",
             "metadata_json": json.dumps({"agent": "live", "adaPriority": True}),
             "ip_address": "192.168.1.104",
-            "created_at": now - timedelta(minutes=1)
+            "created_at": now - timedelta(seconds=30)
         }
     ]
