@@ -19,11 +19,14 @@ from app.modules.support.schemas import (
     OperatorLogSubmitPayload
 )
 from app.modules.support.service import (
+    sio,
     active_calls,
     call_queue,
     online_operators,
     get_operator_info,
-    get_recordings_dir
+    get_recordings_dir,
+    check_and_dispatch_queued_calls,
+    broadcast_admin_telemetry
 )
 
 router = APIRouter(tags=["Support & Operators"])
@@ -48,6 +51,13 @@ async def place_call_request(payload: CallRequestPayload):
         call_queue.insert(0, call_data)
     else:
         call_queue.append(call_data)
+
+    try:
+        await sio.emit("SUPPORT_CALL_ENQUEUED", call_data)
+        await check_and_dispatch_queued_calls()
+        await broadcast_admin_telemetry()
+    except Exception as e:
+        logger.warning(f"Error notifying operators via socket: {e}")
 
     return {
         "success": True,
