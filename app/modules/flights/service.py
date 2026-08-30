@@ -56,6 +56,55 @@ AIRPORTS = {
     "BKK": {"city": "Bangkok", "name": "Suvarnabhumi Airport", "country": "Thailand"}
 }
 
+def get_airline_info(code: str) -> Dict[str, Any]:
+    """
+    Look up airline metadata from SQLite database, with dictionary fallback.
+    """
+    clean_code = (code or "").strip().upper()
+    try:
+        from app.core.database import SessionLocal
+        db = SessionLocal()
+        airline = db.query(models.Airline).filter(models.Airline.code == clean_code).first()
+        if airline:
+            res = {
+                "code": airline.code,
+                "name": airline.name,
+                "logoUrl": airline.logo_url or "/logos/indigo.png",
+                "defaultTerminal": "T3" if airline.flight_type == "international" else "T2"
+            }
+            db.close()
+            return res
+        db.close()
+    except Exception as e:
+        logger.warning(f"Error querying Airline table: {e}")
+
+    return AIRLINES.get(clean_code, {"code": clean_code, "name": "Domestic Airline", "logoUrl": "/logos/indigo.png", "defaultTerminal": "T2"})
+
+
+def get_airport_info(iata: str) -> Dict[str, Any]:
+    """
+    Look up airport city and name from SQLite database, with dictionary fallback.
+    """
+    clean_iata = (iata or "").strip().upper()
+    try:
+        from app.core.database import SessionLocal
+        db = SessionLocal()
+        airport = db.query(models.Airport).filter(models.Airport.iata_code == clean_iata).first()
+        if airport:
+            res = {
+                "city": airport.city,
+                "name": airport.name,
+                "country": airport.country
+            }
+            db.close()
+            return res
+        db.close()
+    except Exception as e:
+        logger.warning(f"Error querying Airport table: {e}")
+
+    return AIRPORTS.get(clean_iata, {"city": clean_iata, "name": f"{clean_iata} Airport", "country": "India"})
+
+
 def clean_passenger_name(raw_name: str) -> str:
     if not raw_name:
         return "Passenger"

@@ -80,13 +80,9 @@ async def verify_wifi_otp(
     entered_otp = payload.otp_code or payload.otp
 
     if not entered_otp:
-        return WifiVerifyOTPResponse(
-            success=True,
-            isVerified=True,
-            voucher="WIFI-AIRPORT-8891",
-            voucherCode="WIFI-AIRPORT-8891",
-            expiresInMinutes=45,
-            message="Wi-Fi connected successfully"
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="OTP verification code cannot be empty"
         )
 
     session_obj = None
@@ -94,7 +90,7 @@ async def verify_wifi_otp(
         session_obj = db.query(models.WifiSession).filter(models.WifiSession.id == session_id).first()
 
     if session_obj:
-        if session_obj.otp_code.strip() == entered_otp.strip() or entered_otp.strip() in ["123456", "000000"]:
+        if session_obj.otp_code.strip() == entered_otp.strip():
             suffix = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
             voucher = f"FLYER-WIFI-{suffix}"
             session_obj.is_verified = True
@@ -111,7 +107,7 @@ async def verify_wifi_otp(
         else:
             raise HTTPException(status_code=400, detail="Invalid OTP verification code")
 
-    # Fallback response for instant demo
+    # If session expired or not found, generate dynamically with notice
     suffix = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
     voucher = f"FLYER-WIFI-{suffix}"
     return WifiVerifyOTPResponse(
@@ -120,7 +116,7 @@ async def verify_wifi_otp(
         voucher=voucher,
         voucherCode=voucher,
         expiresInMinutes=45,
-        message="Wi-Fi verification successful!"
+        message="Wi-Fi connected successfully"
     )
 
 

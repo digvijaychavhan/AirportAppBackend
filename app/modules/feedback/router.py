@@ -11,6 +11,57 @@ from app.modules.feedback.schemas import FeedbackCreate
 
 router = APIRouter(tags=["Feedback"])
 
+@router.get("/api/v1/feedback/categories")
+async def get_feedback_categories(db: Session = Depends(get_db)):
+    """
+    Returns active customer satisfaction feedback survey categories.
+    """
+    try:
+        categories = db.query(models.FeedbackCategory).filter(
+            models.FeedbackCategory.is_active == 1
+        ).order_by(models.FeedbackCategory.sort_order.asc()).all()
+
+        if not categories:
+            # Default categories if not yet seeded
+            return {
+                "success": True,
+                "data": [
+                    {"id": "cleanliness", "title": "Airport Cleanliness", "icon": "cleaning_services"},
+                    {"id": "staff", "title": "Staff Helpfulness", "icon": "support_agent"},
+                    {"id": "navigation", "title": "Signage & Navigation", "icon": "directions"},
+                    {"id": "facilities", "title": "Washrooms & Rest Areas", "icon": "water_drop"},
+                    {"id": "security", "title": "Security Screening", "icon": "security"},
+                    {"id": "overall", "title": "Overall Experience", "icon": "stars"},
+                ]
+            }
+
+        return {
+            "success": True,
+            "data": [
+                {
+                    "id": c.id,
+                    "title": c.title,
+                    "icon": c.icon,
+                    "description": c.description
+                }
+                for c in categories
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Error fetching feedback categories: {e}")
+        return {
+            "success": True,
+            "data": [
+                {"id": "cleanliness", "title": "Airport Cleanliness", "icon": "cleaning_services"},
+                {"id": "staff", "title": "Staff Helpfulness", "icon": "support_agent"},
+                {"id": "navigation", "title": "Signage & Navigation", "icon": "directions"},
+                {"id": "facilities", "title": "Washrooms & Rest Areas", "icon": "water_drop"},
+                {"id": "security", "title": "Security Screening", "icon": "security"},
+                {"id": "overall", "title": "Overall Experience", "icon": "stars"},
+            ]
+        }
+
+
 @router.post("/api/v1/feedback/submit", status_code=status.HTTP_201_CREATED)
 async def submit_feedback(
     payload: FeedbackCreate,

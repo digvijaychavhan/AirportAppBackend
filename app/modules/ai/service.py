@@ -131,12 +131,26 @@ def fallback_intent_parser(transcript: str, kiosk_context: Optional[Dict[str, An
 async def parse_ai_intent(transcript: str, kiosk_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     groq_api_key = settings.GROQ_API_KEY or os.getenv("GROQ_API_KEY", "")
 
+    # Retrieve live POIs from database to inject into system prompt
+    poi_names_str = "Medical Centre, Third Wave Coffee, McDonald's, Relay Books, Duty Free, Encalm Lounge, Gate B12, Gate 24, Restrooms, Baggage Claim"
+    try:
+        from app.core.database import SessionLocal
+        import app.db.models as models
+        db = SessionLocal()
+        pois = db.query(models.Poi).filter(models.Poi.is_active == True).all()
+        if pois:
+            poi_names_str = ", ".join([p.name for p in pois[:30]])
+        db.close()
+    except Exception as dbe:
+        logger.warning(f"Could not load POIs for AI prompt context: {dbe}")
+
     system_prompt = (
         "You are Aero AI, the AI Intent Parser for an Airport Digital Kiosk at Terminal 3. "
+        f"Known active airport locations and services: [{poi_names_str}]. "
         "Convert the user's request into a strict JSON object with fields:\n"
         "- 'action': 'category_page' | 'map' | 'conversation'\n"
-        "- 'targetRoute': string or null (e.g. '/eat-dine', '/wayfinding/shopping', '/flights', '/wifi', '/feedback')\n"
-        "- 'stops': list of location names (e.g. ['Medical Centre', 'Third Wave Coffee', 'Gate B12'])\n"
+        "- 'targetRoute': string or null (e.g. '/eat-dine', '/wayfinding/shopping', '/wayfinding/lounges', '/flights', '/wifi', '/feedback')\n"
+        "- 'stops': list of location names from known locations (e.g. ['Medical Centre', 'Third Wave Coffee', 'Gate B12'])\n"
         "- 'mode': 'elevator' | 'escalator'\n"
         "- 'speechResponse': polite concise response text for passenger\n"
         "Return ONLY the JSON object, no commentary."

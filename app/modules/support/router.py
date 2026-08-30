@@ -556,3 +556,67 @@ async def download_recording(call_id: str):
         filename=f"call_recording_{call_id}.webm",
         headers={"Content-Disposition": f'attachment; filename="call_recording_{call_id}.webm"'}
     )
+
+
+@router.get("/api/v1/operator/call-tags")
+async def get_operator_call_tags(db: Session = Depends(get_db)):
+    """
+    Returns active call query tag categories and subcategories for operator disposition logging.
+    """
+    import json
+    try:
+        categories = db.query(models.QueryTagCategory).filter(
+            models.QueryTagCategory.is_active == True
+        ).order_by(models.QueryTagCategory.sort_order.asc()).all()
+
+        if not categories:
+            # Default fallback list
+            return {
+                "success": True,
+                "data": [
+                    {"id": "cat1", "name": "Accessibility Services"},
+                    {"id": "cat2", "name": "Baggage Services", "subItems": ["Lost", "Delayed", "Damaged"]},
+                    {"id": "cat3", "name": "Check-In Assistance", "subItems": ["Lost", "Delayed", "Damaged"]},
+                    {"id": "cat4", "name": "Customer Complaints"},
+                    {"id": "cat5", "name": "Flight Information", "subItems": ["Delays", "Cancellations", "Flight Changes"]},
+                    {"id": "cat6", "name": "Location & Navigation", "subItems": ["Amenities", "Dining", "Services", "Shops"]},
+                    {"id": "cat7", "name": "Lost & Found", "subItems": ["Report Found Item", "Looking for Lost Item"]},
+                    {"id": "cat8", "name": "Security Screening"},
+                    {"id": "cat9", "name": "Transportation Services", "subItems": ["Taxi", "Bus", "Metro", "Rental"]},
+                    {"id": "cat10", "name": "Travel Documentation", "subItems": ["Visa", "Passport", "Requirements"]},
+                ]
+            }
+
+        data = []
+        for c in categories:
+            subs = []
+            if c.sub_items_json:
+                try:
+                    subs = json.loads(c.sub_items_json)
+                except Exception:
+                    subs = []
+            data.append({
+                "id": c.id,
+                "name": c.name,
+                "subItems": subs
+            })
+
+        return {"success": True, "data": data}
+    except Exception as e:
+        logger.error(f"Error fetching call tags: {e}")
+        return {
+            "success": True,
+            "data": [
+                {"id": "cat1", "name": "Accessibility Services"},
+                {"id": "cat2", "name": "Baggage Services", "subItems": ["Lost", "Delayed", "Damaged"]},
+                {"id": "cat3", "name": "Check-In Assistance", "subItems": ["Lost", "Delayed", "Damaged"]},
+                {"id": "cat4", "name": "Customer Complaints"},
+                {"id": "cat5", "name": "Flight Information", "subItems": ["Delays", "Cancellations", "Flight Changes"]},
+                {"id": "cat6", "name": "Location & Navigation", "subItems": ["Amenities", "Dining", "Services", "Shops"]},
+                {"id": "cat7", "name": "Lost & Found", "subItems": ["Report Found Item", "Looking for Lost Item"]},
+                {"id": "cat8", "name": "Security Screening"},
+                {"id": "cat9", "name": "Transportation Services", "subItems": ["Taxi", "Bus", "Metro", "Rental"]},
+                {"id": "cat10", "name": "Travel Documentation", "subItems": ["Visa", "Passport", "Requirements"]},
+            ]
+        }
+

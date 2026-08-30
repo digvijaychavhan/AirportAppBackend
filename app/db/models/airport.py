@@ -53,3 +53,14 @@ class Flight(Base):
     status = Column(String, default="On Time")
 
     airline = relationship("Airline", back_populates="flights")
+
+
+class Airport(Base):
+    __tablename__ = "airports"
+
+    iata_code = Column(String, primary_key=True, index=True)  # e.g., "DEL", "BOM", "PNQ"
+    city = Column(String, nullable=False)
+    name = Column(String, nullable=False)
+    country = Column(String, default="India")
+    is_active = Column(Boolean, default=True)
+

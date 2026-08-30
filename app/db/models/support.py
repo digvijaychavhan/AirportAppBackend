@@ -62,3 +62,14 @@ class ScreenAnnotation(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     call = relationship("SupportCall", back_populates="annotations")
+
+
+class QueryTagCategory(Base):
+    __tablename__ = "query_tag_categories"
+
+    id = Column(String, primary_key=True)  # e.g. "cat1", "cat2"
+    name = Column(String, nullable=False)   # e.g. "Accessibility Services"
+    sub_items_json = Column(Text, nullable=True)  # JSON array string, e.g. '["Lost", "Delayed"]'
+    sort_order = Column(Integer, default=0)
+    is_active = Column(Boolean, default=True)
+
