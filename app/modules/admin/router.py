@@ -116,6 +116,9 @@ async def get_admin_overview(db: Session = Depends(get_db)):
 
 
 @router.get("/api/v1/admin/network")
+@router.head("/api/v1/admin/network")
+@router.get("/api/v1/network/health")
+@router.head("/api/v1/network/health")
 async def get_network_health():
     active_kiosks_count = len([k for k in online_kiosks.values() if k.get("sid") in connected_clients or k.get("sid")])
     return {
