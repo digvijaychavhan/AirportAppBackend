@@ -66,9 +66,9 @@ def create_app() -> FastAPI:
         expose_headers=["*"],
     )
 
-    # 2. Base Health Check Endpoints
-    @app.get("/", tags=["Health"])
-    @app.get("/health", tags=["Health"])
+    # 2. Base Health Check Endpoints (Support both GET and HEAD methods)
+    @app.api_route("/", methods=["GET", "HEAD"], tags=["Health"])
+    @app.api_route("/health", methods=["GET", "HEAD"], tags=["Health"])
     async def health_check():
         return {
             "status": "online",
