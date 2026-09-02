@@ -84,29 +84,6 @@ async def search_flights(
             "delayReason": None
         })
 
-    # If no exact SQL matches but query looks like a flight number, generate dynamic entry
-    if not formatted_flights and len(clean_q) >= 3:
-        carrier_code = clean_q[:2]
-        num_part = re.sub(r"\D", "", clean_q) or "202"
-        airline_info = AIRLINES.get(carrier_code, {"code": carrier_code, "name": "Domestic Airline", "logoUrl": "/logos/indigo.png", "defaultTerminal": "T2"})
-        formatted_flights.append({
-            "id": f"fl_{carrier_code.lower()}{num_part}",
-            "flightNumber": f"{carrier_code} {num_part}",
-            "airline": airline_info,
-            "airlineCode": carrier_code,
-            "origin": "DEL",
-            "destination": "PNQ" if ("PUNE" in clean_q or "PNQ" in clean_q or "2262" in clean_q) else "BOM",
-            "destinationName": "Pune" if ("PUNE" in clean_q or "PNQ" in clean_q or "2262" in clean_q) else "Mumbai",
-            "scheduledDeparture": "2026-08-17T11:45:00Z",
-            "estimatedDeparture": None,
-            "terminal": airline_info.get("defaultTerminal", "T2"),
-            "gate": "B12" if carrier_code == "6E" else "A08",
-            "checkinCounters": "45 – 52",
-            "baggageBelt": "Carousel 4",
-            "status": "ON TIME",
-            "delayReason": None
-        })
-
     return {"success": True, "data": formatted_flights}
 
 
@@ -122,48 +99,30 @@ async def decode_boarding_pass(
     kiosk_id = payload.kiosk_id or "T3-L1-K04"
 
     if not raw_bc:
-        # Default fallback sample data
         return {
-            "success": True,
-            "data": {
-                "passengerName": "Nirant Patil",
-                "pnr": "K9BZMM",
-                "flightNumber": "6E 2262",
-                "airline": {"code": "6E", "name": "IndiGo", "logoUrl": "/logos/indigo.png"},
-                "origin": "DEL",
-                "originCity": "Delhi",
-                "destination": "PNQ",
-                "destinationName": "Pune",
-                "seatNumber": "20B",
-                "cabinClass": "Economy (Y)",
-                "scheduledDeparture": "2026-08-17T11:45:00Z",
-                "estimatedDeparture": "2026-08-17T11:45:00Z",
-                "terminal": "T2",
-                "gate": "B12",
-                "checkinCounters": "45 – 52",
-                "baggageBelt": "Carousel 4",
-                "status": "ON TIME"
-            }
+            "success": False,
+            "error": "Barcode string is required",
+            "data": None
         }
 
     try:
         decoded = decode_bcbp(raw_bc)
-        pname = decoded.get("passenger_name", "Nirant Patil")
-        pnr = decoded.get("pnr", "K9BZMM")
-        flight_number = decoded.get("flight_number", "6E 2262")
-        airline_code = decoded.get("airline_code", "6E")
-        airline_name = decoded.get("airline_name", "IndiGo")
-        airline_logo = decoded.get("airline_logo", "/logos/indigo.png")
-        origin = decoded.get("origin_iata", "DEL")
-        origin_city = decoded.get("origin_city", "Delhi")
-        destination = decoded.get("destination_iata", "PNQ")
-        destination_city = decoded.get("destination_city", "Pune")
-        seat_num = decoded.get("seat_number", "20B")
-        cabin = decoded.get("cabin_class", "Economy (Y)")
-        terminal = decoded.get("terminal", "T2")
-        gate = decoded.get("gate", "B12")
-        belt = decoded.get("baggage_belt", "Carousel 4")
-        status_val = decoded.get("status", "ON TIME")
+        pname = decoded.get("passenger_name", "")
+        pnr = decoded.get("pnr", "")
+        flight_number = decoded.get("flight_number", "")
+        airline_code = decoded.get("airline_code", "")
+        airline_name = decoded.get("airline_name", "")
+        airline_logo = decoded.get("airline_logo", "")
+        origin = decoded.get("origin_iata", "")
+        origin_city = decoded.get("origin_city", "")
+        destination = decoded.get("destination_iata", "")
+        destination_city = decoded.get("destination_city", "")
+        seat_num = decoded.get("seat_number", "")
+        cabin = decoded.get("cabin_class", "")
+        terminal = decoded.get("terminal", "")
+        gate = decoded.get("gate", "")
+        belt = decoded.get("baggage_belt", "")
+        status_val = decoded.get("status", "")
 
         # Record scan in database
         try:
@@ -173,7 +132,7 @@ async def decode_boarding_pass(
                 flight_number=flight_number,
                 pnr=pnr,
                 seat=seat_num,
-                barcode_format="IATA_BCBP_PDF417",
+                barcode_format="IATA_BCBP",
                 scan_result="SUCCESS",
                 raw_data=raw_bc[:255]
             )
@@ -186,34 +145,33 @@ async def decode_boarding_pass(
         return {
             "success": True,
             "data": {
-                "formatCode": decoded.get("format_code", "M"),
-                "numberOfLegs": decoded.get("number_of_legs", 1),
+                "formatCode": decoded.get("format_code", ""),
+                "numberOfLegs": decoded.get("number_of_legs"),
                 "passengerName": pname,
-                "passengerNameRaw": decoded.get("passenger_name_raw", pname),
-                "electronicTicketIndicator": decoded.get("electronic_ticket_indicator", "E"),
+                "passengerNameRaw": decoded.get("passenger_name_raw", ""),
+                "electronicTicketIndicator": decoded.get("electronic_ticket_indicator", ""),
                 "pnr": pnr,
                 "flightNumber": flight_number,
                 "airline": {"code": airline_code, "name": airline_name, "logoUrl": airline_logo},
                 "origin": origin,
                 "originCity": origin_city,
-                "originAirport": decoded.get("origin_airport", origin_city),
+                "originAirport": decoded.get("origin_airport", ""),
                 "destination": destination,
                 "destinationName": destination_city,
-                "destinationAirport": decoded.get("destination_airport", destination_city),
-                "julianDate": decoded.get("julian_date"),
-                "flightDate": decoded.get("flight_date"),
-                "compartmentCode": decoded.get("compartment_code", "Y"),
+                "destinationAirport": decoded.get("destination_airport", ""),
+                "julianDate": decoded.get("julian_date", ""),
+                "flightDate": decoded.get("flight_date", ""),
+                "flightDateIso": decoded.get("flight_date_iso", ""),
+                "compartmentCode": decoded.get("compartment_code", ""),
                 "cabinClass": cabin,
                 "seatNumber": seat_num,
-                "checkinSequence": decoded.get("checkin_sequence"),
-                "passengerStatusCode": decoded.get("passenger_status_code"),
-                "passengerStatus": decoded.get("passenger_status"),
-                "conditionalDataSize": decoded.get("conditional_data_size"),
-                "scheduledDeparture": "2026-08-17T11:45:00Z",
-                "estimatedDeparture": "2026-08-17T11:45:00Z",
+                "checkinSequence": decoded.get("checkin_sequence", ""),
+                "passengerStatusCode": decoded.get("passenger_status_code", ""),
+                "passengerStatus": decoded.get("passenger_status", ""),
+                "conditionalDataSize": decoded.get("conditional_data_size", ""),
                 "terminal": terminal,
                 "gate": gate,
-                "checkinCounters": "45 – 52",
+                "checkinCounters": "",
                 "baggageBelt": belt,
                 "status": status_val,
                 "rawBarcode": raw_bc
@@ -222,63 +180,10 @@ async def decode_boarding_pass(
     except Exception as e:
         logger.error(f"Error decoding BCBP barcode: {e}")
         return {
-            "success": True,
-            "data": {
-                "passengerName": "Passenger",
-                "pnr": "ABC123",
-                "flightNumber": "6E 2262",
-                "airline": {"code": "6E", "name": "IndiGo", "logoUrl": "/logos/indigo.png"},
-                "origin": "DEL",
-                "originCity": "Delhi",
-                "destination": "PNQ",
-                "destinationName": "Pune",
-                "seatNumber": "12A",
-                "cabinClass": "Economy (Y)",
-                "terminal": "T2",
-                "gate": "B12",
-                "status": "ON TIME"
-            }
+            "success": False,
+            "error": f"Failed to decode barcode: {str(e)}",
+            "data": None
         }
-
-
-@router.get("/api/v1/flights/{flight_id}")
-async def get_flight_by_id(
-    flight_id: str,
-    db: Session = Depends(get_db)
-):
-    """
-    Retrieve flight status by flight ID or flight number.
-    """
-    clean_id = flight_id.strip()
-    flight = db.query(models.Flight).filter(
-        (models.Flight.id == clean_id) |
-        (models.Flight.flight_number.ilike(clean_id))
-    ).first()
-
-    if not flight:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"success": False, "message": f"Flight '{flight_id}' not found"}
-        )
-
-    return {
-        "success": True,
-        "data": {
-            "id": flight.id,
-            "flightNumber": flight.flight_number,
-            "airlineCode": flight.airline_code,
-            "origin": flight.origin_iata,
-            "destination": flight.destination_iata,
-            "destinationName": flight.destination_name,
-            "scheduledDeparture": flight.scheduled_departure.isoformat() if flight.scheduled_departure else None,
-            "estimatedDeparture": flight.estimated_departure.isoformat() if flight.estimated_departure else None,
-            "terminal": flight.terminal,
-            "gate": flight.gate,
-            "checkinCounters": flight.checkin_counters,
-            "baggageBelt": flight.baggage_belt,
-            "status": flight.status
-        }
-    }
 
 
 @router.get("/api/v1/flights/popular")
@@ -288,13 +193,11 @@ async def get_popular_flights(db: Session = Depends(get_db)):
     """
     try:
         flights = db.query(models.Flight).order_by(models.Flight.scheduled_departure.asc()).limit(8).all()
-        if flights:
-            flight_numbers = [f.flight_number for f in flights]
-            return {"success": True, "data": flight_numbers}
-        return {"success": True, "data": ["6E 203", "AI 101", "UK 812", "SG 812", "6E 2262", "QP 1304", "BA 142"]}
+        flight_numbers = [f.flight_number for f in flights] if flights else []
+        return {"success": True, "data": flight_numbers}
     except Exception as e:
         logger.error(f"Error fetching popular flights: {e}")
-        return {"success": True, "data": ["6E 203", "AI 101", "UK 812", "SG 812", "6E 2262", "QP 1304", "BA 142"]}
+        return {"success": True, "data": []}
 
 
 @router.get("/api/v1/flights/gates")
@@ -359,60 +262,93 @@ async def get_departure_gates(db: Session = Depends(get_db)):
 
 
 @router.get("/api/v1/flights/demo-boarding-pass")
-async def get_demo_boarding_pass(db: Session = Depends(get_db)):
+async def get_demo_boarding_pass():
     """
-    Returns realistic sample IATA BCBP raw barcode and passenger object for simulated scanning.
+    Returns a sample IATA BCBP decoded boarding pass object for kiosk testing.
     """
+    sample_barcode = "M1DOE/JOHN            EABC123 LHRJFKBA 0115 142Y012A0045100"
     try:
-        flight = db.query(models.Flight).filter(models.Flight.flight_number == "6E 2262").first()
-        if not flight:
-            flight = db.query(models.Flight).first()
-
-        sample_barcode = "M1PATIL/NIRANT         K9BZMM DELPNQ6E 2262 192Y020B0143 348>5181 O6192B6E 03122167960012A0000000000000 0   6E 035884273        15KN"
+        decoded = decode_bcbp(sample_barcode)
         return {
             "success": True,
             "data": {
                 "rawBarcode": sample_barcode,
-                "passengerName": "Nirant Patil",
-                "pnr": "K9BZMM",
-                "flightNumber": flight.flight_number if flight else "6E 2262",
+                "formatCode": decoded.get("format_code"),
+                "numberOfLegs": decoded.get("number_of_legs"),
+                "passengerName": decoded.get("passenger_name"),
+                "passengerNameRaw": decoded.get("passenger_name_raw"),
+                "electronicTicketIndicator": decoded.get("electronic_ticket_indicator"),
+                "pnr": decoded.get("pnr"),
+                "flightNumber": decoded.get("flight_number"),
                 "airline": {
-                    "code": flight.airline_code if flight else "6E",
-                    "name": "IndiGo" if not flight or flight.airline_code == "6E" else "Airline",
-                    "logoUrl": "/logos/indigo.png"
+                    "code": decoded.get("airline_code"),
+                    "name": decoded.get("airline_name"),
+                    "logoUrl": decoded.get("airline_logo")
                 },
-                "origin": flight.origin_iata if flight else "DEL",
-                "originCity": "Delhi",
-                "destination": flight.destination_iata if flight else "PNQ",
-                "destinationName": flight.destination_name if flight else "Pune",
-                "seatNumber": "20B",
-                "cabinClass": "Economy (Y)",
-                "terminal": flight.terminal if flight else "Terminal 3",
-                "gate": flight.gate if flight else "B12",
-                "checkinCounters": flight.checkin_counters if flight else "45 – 52",
-                "baggageBelt": flight.baggage_belt if flight else "Carousel 4",
-                "status": flight.status if flight else "ON TIME"
+                "origin": decoded.get("origin_iata"),
+                "originCity": decoded.get("origin_city"),
+                "originAirport": decoded.get("origin_airport"),
+                "destination": decoded.get("destination_iata"),
+                "destinationName": decoded.get("destination_city"),
+                "destinationAirport": decoded.get("destination_airport"),
+                "seatNumber": decoded.get("seat_number"),
+                "cabinClass": decoded.get("cabin_class"),
+                "julianDate": decoded.get("julian_date"),
+                "flightDate": decoded.get("flight_date"),
+                "checkinSequence": decoded.get("checkin_sequence"),
+                "passengerStatus": decoded.get("passenger_status"),
+                "terminal": decoded.get("terminal", ""),
+                "gate": decoded.get("gate", ""),
+                "status": decoded.get("status", "")
             }
         }
     except Exception as e:
         logger.error(f"Error generating demo boarding pass: {e}")
         return {
-            "success": True,
-            "data": {
-                "rawBarcode": "M1PATIL/NIRANT         K9BZMM DELPNQ6E 2262 192Y020B0143",
-                "passengerName": "Nirant Patil",
-                "pnr": "K9BZMM",
-                "flightNumber": "6E 2262",
-                "airline": {"code": "6E", "name": "IndiGo", "logoUrl": "/logos/indigo.png"},
-                "origin": "DEL",
-                "destination": "PNQ",
-                "destinationName": "Pune",
-                "terminal": "Terminal 3",
-                "gate": "B12",
-                "seatNumber": "20B",
-                "status": "ON TIME"
-            }
+            "success": False,
+            "error": str(e),
+            "data": None
         }
+
+
+@router.get("/api/v1/flights/{flight_id}")
+async def get_flight_by_id(
+    flight_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Retrieve flight status by flight ID or flight number.
+    """
+    clean_id = flight_id.strip()
+    flight = db.query(models.Flight).filter(
+        (models.Flight.id == clean_id) |
+        (models.Flight.flight_number.ilike(clean_id))
+    ).first()
+
+    if not flight:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"success": False, "message": f"Flight '{flight_id}' not found"}
+        )
+
+    return {
+        "success": True,
+        "data": {
+            "id": flight.id,
+            "flightNumber": flight.flight_number,
+            "airlineCode": flight.airline_code,
+            "origin": flight.origin_iata,
+            "destination": flight.destination_iata,
+            "destinationName": flight.destination_name,
+            "scheduledDeparture": flight.scheduled_departure.isoformat() if flight.scheduled_departure else None,
+            "estimatedDeparture": flight.estimated_departure.isoformat() if flight.estimated_departure else None,
+            "terminal": flight.terminal,
+            "gate": flight.gate,
+            "checkinCounters": flight.checkin_counters,
+            "baggageBelt": flight.baggage_belt,
+            "status": flight.status
+        }
+    }
 
 
 @router.get("/api/v1/baggage/belts")

@@ -107,7 +107,7 @@ def get_airport_info(iata: str) -> Dict[str, Any]:
 
 def clean_passenger_name(raw_name: str) -> str:
     if not raw_name:
-        return "Passenger"
+        return ""
     cleaned = re.sub(r"\b(MR|MRS|MS|MISS|MSTR|DR|PROF)\b", "", raw_name, flags=re.IGNORECASE).strip()
     if "/" in cleaned:
         parts = [p.strip() for p in cleaned.split("/") if p.strip()]

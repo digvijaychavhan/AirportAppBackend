@@ -29,13 +29,25 @@ def test_flights_search_query():
     assert data["success"] is True
     assert any("6E" in f["flightNumber"] or f.get("airlineCode") == "6E" for f in data["data"])
 
-def test_bcbp_decode_default():
+def test_bcbp_decode_empty():
     response = client.post("/api/v1/flights/bcbp-decode", json={})
     assert response.status_code == 200
     data = response.json()
+    assert data["success"] is False
+    assert "required" in data["error"].lower()
+
+def test_bcbp_decode_valid():
+    sample = "M1DOE/JOHN            EABC123 LHRJFKBA 0115 142Y012A0045100"
+    response = client.post("/api/v1/flights/bcbp-decode", json={"rawBarcode": sample})
+    assert response.status_code == 200
+    data = response.json()
     assert data["success"] is True
-    assert data["data"]["passengerName"] == "Nirant Patil"
-    assert data["data"]["flightNumber"] == "6E 2262"
+    assert data["data"]["passengerName"] == "John Doe"
+    assert data["data"]["pnr"] == "ABC123"
+    assert data["data"]["flightNumber"] == "BA 115"
+    assert data["data"]["origin"] == "LHR"
+    assert data["data"]["destination"] == "JFK"
+    assert data["data"]["seatNumber"] == "12A"
 
 def test_baggage_belts():
     response = client.get("/api/v1/baggage/belts")
