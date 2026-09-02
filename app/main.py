@@ -47,19 +47,11 @@ def create_app() -> FastAPI:
         redoc_url="/redoc"
     )
 
-    # 1. CORS Middleware - Explicitly support Vercel deployment, previews, and local kiosk
-    allowed_origins = [
-        "https://airport-app-mocha.vercel.app",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:5000",
-        "http://127.0.0.1:5000",
-    ]
-
+    # 1. CORS Middleware - Support all origins (Vercel, custom domains, IP endpoints, LAN, and localhost)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=allowed_origins,
-        allow_origin_regex=r"https:\/\/.*\.vercel\.app|http:\/\/localhost:.*|http:\/\/127\.0\.0\.1:.*",
+        allow_origins=["*"],
+        allow_origin_regex=r".*",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
