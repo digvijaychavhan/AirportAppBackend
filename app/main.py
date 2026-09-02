@@ -47,13 +47,23 @@ def create_app() -> FastAPI:
         redoc_url="/redoc"
     )
 
-    # 1. CORS Middleware
+    # 1. CORS Middleware - Explicitly support Vercel deployment, previews, and local kiosk
+    allowed_origins = [
+        "https://airport-app-mocha.vercel.app",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5000",
+        "http://127.0.0.1:5000",
+    ]
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=allowed_origins,
+        allow_origin_regex=r"https:\/\/.*\.vercel\.app|http:\/\/localhost:.*|http:\/\/127\.0\.0\.1:.*",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["*"],
     )
 
     # 2. Base Health Check Endpoints
