@@ -227,53 +227,36 @@ async def disconnect(sid: str):
 
         if role == "operator":
             if client_id and client_id in online_operators:
-                online_operators[client_id]["status"] = "OFFLINE"
                 online_operators[client_id]["sid"] = None
             for k, op_data in online_operators.items():
                 if op_data.get("sid") == sid:
-                    op_data["status"] = "OFFLINE"
                     op_data["sid"] = None
             await broadcast_admin_telemetry()
 
         if role == "kiosk":
             for kid, kdata in list(online_kiosks.items()):
-                if kdata.get("sid") == sid or kid == client_id:
+                if kdata.get("sid") == sid:
                     online_kiosks.pop(kid, None)
             await broadcast_admin_telemetry()
 
-        removed_calls = [c for c in call_queue if c.get("kioskSid") == sid or (client_id and c.get("kioskId") == client_id)]
+        # Only cancel from queue if call is still waiting in QUEUED state (passenger disconnected before answer)
+        removed_calls = [c for c in call_queue if (c.get("kioskSid") == sid or (client_id and c.get("kioskId") == client_id)) and c.get("status") == "QUEUED"]
         call_queue = [c for c in call_queue if c not in removed_calls]
         for c in removed_calls:
             cid = c.get("callId")
-            if cid in active_calls:
+            if cid in active_calls and active_calls[cid].get("status") == "QUEUED":
                 active_calls.pop(cid, None)
             await sio.emit("SUPPORT_CALL_CANCELLED", {"callId": cid, "kioskId": c.get("kioskId")}, room="operators")
             await sio.emit("INCOMING_CALL_DISMISSED", {"callId": cid}, room="operators")
 
+        # For in-progress calls, clear the disconnected sid without destroying the call session
         call_id = client_info.get("active_call_id")
         if call_id and call_id in active_calls:
-            call_session = active_calls.pop(call_id, None)
-            dur_secs = 0
-            if call_session:
-                start_time_str = call_session.get("startTime")
-                if start_time_str:
-                    try:
-                        start_dt = datetime.fromisoformat(start_time_str)
-                        dur_secs = max(1, int((datetime.utcnow() - start_dt).total_seconds()))
-                    except Exception:
-                        pass
-                auto_save_support_call(call_id, call_session, dur_secs)
-
-            await sio.emit(
-                "CALL_ENDED",
-                {"callId": call_id, "reason": "PEER_DISCONNECTED", "durationSeconds": dur_secs},
-                room=f"call_{call_id}"
-            )
-            op_id = call_session.get("operatorId") if call_session else None
-            if op_id and op_id in online_operators:
-                online_operators[op_id]["status"] = "AVAILABLE"
-                online_operators[op_id]["availableSince"] = datetime.utcnow().timestamp()
-                online_operators[op_id]["currentCallId"] = None
+            session = active_calls[call_id]
+            if session.get("operatorSid") == sid:
+                session["operatorSid"] = None
+            if session.get("kioskSid") == sid:
+                session["kioskSid"] = None
 
 
 @sio.event
@@ -591,12 +574,29 @@ async def JOIN_CALL_ROOM(sid: str, data: Dict[str, Any]):
     if call_id:
         room_name = f"call_{call_id}"
         await sio.enter_room(sid, room_name)
+
+        if role == "operator":
+            if call_id in active_calls:
+                active_calls[call_id]["operatorSid"] = sid
+                active_calls[call_id]["status"] = "IN_PROGRESS"
+                if data.get("kioskId"):
+                    active_calls[call_id]["kioskId"] = data.get("kioskId")
+            else:
+                active_calls[call_id] = {
+                    "callId": call_id,
+                    "kioskId": data.get("kioskId") or data.get("clientId") or "Kiosk",
+                    "operatorSid": sid,
+                    "operatorId": data.get("operatorId") or "Operator",
+                    "status": "IN_PROGRESS",
+                    "startTime": datetime.utcnow().isoformat()
+                }
+
         if role == "kiosk" and call_id in active_calls:
             active_calls[call_id]["kioskSid"] = sid
             session = active_calls[call_id]
             op_id = session.get("operatorId")
             op_info = get_operator_info(op_id) if op_id else {}
-            op_name = session.get("operatorName") or op_info.get("name", "Priya Sharma")
+            op_name = session.get("operatorName") or op_info.get("name", "Operator")
             op_role = session.get("operatorRole") or op_info.get("role", "Customer Support Executive")
             await sio.emit("CALL_INFO", {
                 "callId": call_id,
@@ -606,6 +606,7 @@ async def JOIN_CALL_ROOM(sid: str, data: Dict[str, Any]):
                 "status": session.get("status", "IN_PROGRESS"),
                 "startTime": session.get("startTime")
             }, room=sid)
+
         if sid in connected_clients:
             connected_clients[sid]["active_call_id"] = call_id
 
@@ -616,6 +617,22 @@ async def OPERATOR_READY(sid: str, data: Dict[str, Any]):
     operator_id = data.get("operatorId")
     if not operator_id and call_id in active_calls:
         operator_id = active_calls[call_id].get("operatorId")
+
+    if call_id:
+        if call_id in active_calls:
+            active_calls[call_id]["operatorSid"] = sid
+            active_calls[call_id]["status"] = "IN_PROGRESS"
+            if data.get("kioskId"):
+                active_calls[call_id]["kioskId"] = data.get("kioskId")
+        else:
+            active_calls[call_id] = {
+                "callId": call_id,
+                "kioskId": data.get("kioskId") or data.get("clientId") or "Kiosk",
+                "operatorSid": sid,
+                "operatorId": operator_id or "Operator",
+                "status": "IN_PROGRESS",
+                "startTime": datetime.utcnow().isoformat()
+            }
 
     op_info = get_operator_info(operator_id) if operator_id else {}
     op_name = op_info.get("name") or (active_calls.get(call_id, {}).get("operatorName", "Priya Sharma"))
