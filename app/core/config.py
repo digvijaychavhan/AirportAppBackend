@@ -12,7 +12,7 @@ try:
 
     class Settings(BaseSettings):
         PROJECT_NAME: str = Field(default="Airport Digital Helpdesk Backend")
-        VERSION: str = Field(default="2.0.0")
+        VERSION: str = Field(default="7.0.0")
         ENVIRONMENT: str = Field(default="development")
         PORT: int = Field(default=5000)
         DATABASE_URL: str = Field(default="sqlite:///./app.db")
@@ -28,7 +28,7 @@ try:
 except Exception:
     class SettingsFallback:
         PROJECT_NAME: str = "Airport Digital Helpdesk Backend"
-        VERSION: str = "2.0.0"
+        VERSION: str = "7.0.0"
         ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
         PORT: int = int(os.getenv("PORT", "5000"))
         DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./app.db")
