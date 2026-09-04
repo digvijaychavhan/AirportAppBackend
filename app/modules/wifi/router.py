@@ -10,7 +10,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.logging import logger
+from app.core.timezone import get_current_time
 import app.db.models as models
+from app.core.security import generate_numeric_otp
 from app.modules.wifi.schemas import (
     WifiOTPRequest,
     WifiOTPResponse,
@@ -37,8 +39,8 @@ async def request_wifi_otp(
             detail="Phone number cannot be empty"
         )
 
-    otp_code = "".join(random.choices(string.digits, k=6))
-    expires_at = datetime.utcnow() + timedelta(minutes=10)
+    otp_code = generate_numeric_otp(6)
+    expires_at = get_current_time() + timedelta(minutes=10)
 
     try:
         session_obj = models.WifiSession(
@@ -89,9 +91,10 @@ async def verify_wifi_otp(
     if session_id:
         session_obj = db.query(models.WifiSession).filter(models.WifiSession.id == session_id).first()
 
+    import secrets
     if session_obj:
         if session_obj.otp_code.strip() == entered_otp.strip():
-            suffix = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
+            suffix = "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(6))
             voucher = f"FLYER-WIFI-{suffix}"
             session_obj.is_verified = True
             session_obj.voucher_code = voucher
@@ -108,7 +111,7 @@ async def verify_wifi_otp(
             raise HTTPException(status_code=400, detail="Invalid OTP verification code")
 
     # If session expired or not found, generate dynamically with notice
-    suffix = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
+    suffix = "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(6))
     voucher = f"FLYER-WIFI-{suffix}"
     return WifiVerifyOTPResponse(
         success=True,
@@ -118,6 +121,7 @@ async def verify_wifi_otp(
         expiresInMinutes=45,
         message="Wi-Fi connected successfully"
     )
+
 
 
 @router.post("/api/v1/wifi/scan-passport")
@@ -169,7 +173,7 @@ async def scan_passport_for_wifi(
                 otp_code="PASSPORT_VERIFIED",
                 is_verified=True,
                 voucher_code=wifi_data["voucher_code"],
-                expires_at=datetime.utcnow() + timedelta(minutes=45)
+                expires_at=get_current_time() + timedelta(minutes=45)
             )
             db.add(session_obj)
             db.commit()

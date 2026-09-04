@@ -19,6 +19,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.logging import logger
+from app.core.security import verify_password, hash_password, generate_secure_token
+from app.core.timezone import get_current_time, get_current_iso, time_diff_seconds
 import app.db.models as models
 from app.modules.support.service import online_operators, connected_clients, online_kiosks, sio
 from app.modules.admin.schemas import (
@@ -34,6 +36,7 @@ from app.modules.admin.schemas import (
     AmenityPayload,
     CategoryPayload
 )
+from app.modules.wayfinding.service import pathfinding_engine
 
 router = APIRouter(tags=["Admin & Telemetry"])
 
@@ -144,12 +147,12 @@ async def get_devices(db: Session = Depends(get_db)):
     try:
         devices = db.query(models.Device).order_by(models.Device.device_id).all()
         active_kiosks_count = len([k for k in online_kiosks.values() if k.get("sid") in connected_clients or k.get("sid")])
-        now = datetime.utcnow()
+        now = get_current_time()
 
         data = []
         for d in devices:
             # Determine if active recently (< 2 mins)
-            is_recent = d.last_heartbeat and (now - d.last_heartbeat).total_seconds() < 120
+            is_recent = d.last_heartbeat and time_diff_seconds(now, d.last_heartbeat) < 120
             is_online = is_recent or (d.device_id in online_kiosks) or (active_kiosks_count > 0 and d.device_id == "KIOSK-T3-L1-04")
 
             data.append({
@@ -201,7 +204,7 @@ async def record_telemetry_heartbeat(
             (models.Device.device_id == f"KIOSK-{kiosk_id}")
         ).first()
 
-        now = datetime.utcnow()
+        now = get_current_time()
         if not dev:
             # Auto-register device if first time reporting
             dev = models.Device(
@@ -274,7 +277,7 @@ async def create_or_update_device(
     db: Session = Depends(get_db)
 ):
     try:
-        device_id = payload.device_id or f"DEV-{datetime.utcnow().strftime('%M%S')}"
+        device_id = payload.device_id or f"DEV-{get_current_time().strftime('%M%S')}"
         existing = db.query(models.Device).filter(
             (models.Device.id == payload.id) | (models.Device.device_id == device_id)
         ).first()
@@ -320,7 +323,7 @@ async def ping_device(device_id: str, db: Session = Depends(get_db)):
 
         latency = random.randint(4, 18)
         dev.ping_ms = latency
-        dev.last_heartbeat = datetime.utcnow()
+        dev.last_heartbeat = get_current_time()
         db.commit()
         return {"success": True, "deviceId": dev.device_id, "pingMs": latency, "status": "online"}
     except HTTPException:
@@ -381,7 +384,7 @@ async def operator_login(payload: OperatorLoginPayload, db: Session = Depends(ge
         if not op:
             raise HTTPException(status_code=401, detail="Invalid username or employee code")
 
-        if op.password and op.password != password and password != "operator123":
+        if not verify_password(password, op.password):
             raise HTTPException(status_code=401, detail="Incorrect password")
 
         op.status = "available"
@@ -398,7 +401,8 @@ async def operator_login(payload: OperatorLoginPayload, db: Session = Depends(ge
                 "role": op.role,
                 "status": "available",
                 "supportedLanguages": op.supported_languages,
-                "shift": op.shift
+                "shift": op.shift,
+                "token": generate_secure_token(32)
             }
         }
     except HTTPException:
@@ -406,6 +410,7 @@ async def operator_login(payload: OperatorLoginPayload, db: Session = Depends(ge
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @router.get("/api/v1/admin/operators")
@@ -446,7 +451,7 @@ async def create_or_update_operator(
     db: Session = Depends(get_db)
 ):
     try:
-        emp_code = payload.employee_code or f"EMP-{datetime.utcnow().strftime('%M%S')}"
+        emp_code = payload.employee_code or f"EMP-{get_current_time().strftime('%M%S')}"
         username = payload.username or payload.name.lower().replace(" ", ".")
 
         existing = db.query(models.Operator).filter(
@@ -460,15 +465,16 @@ async def create_or_update_operator(
             existing.supported_languages = payload.supported_languages or existing.supported_languages
             existing.shift = payload.shift or existing.shift
             if payload.password:
-                existing.password = payload.password
+                existing.password = hash_password(payload.password.strip())
             db.commit()
             return {"success": True, "message": "Operator updated successfully"}
         else:
+            raw_pw = payload.password.strip() if payload.password else "operator123"
             new_op = models.Operator(
                 employee_code=emp_code,
                 username=username,
                 name=payload.name,
-                password=payload.password or "operator123",
+                password=hash_password(raw_pw),
                 role=payload.role or "Customer Support Executive",
                 status=payload.status or "available",
                 supported_languages=payload.supported_languages or "English, Hindi",
@@ -522,7 +528,7 @@ async def set_operator_password(
         if not op:
             raise HTTPException(status_code=404, detail="Operator not found")
 
-        op.password = payload.password.strip()
+        op.password = hash_password(payload.password.strip())
         db.commit()
         return {"success": True, "message": "Password updated successfully"}
     except HTTPException:
@@ -533,6 +539,7 @@ async def set_operator_password(
 
 
 @router.delete("/api/v1/admin/operators/{op_id}")
+
 async def delete_operator(op_id: str, db: Session = Depends(get_db)):
     try:
         op = db.query(models.Operator).filter((models.Operator.id == op_id) | (models.Operator.employee_code == op_id)).first()
@@ -552,9 +559,15 @@ async def delete_operator(op_id: str, db: Session = Depends(get_db)):
 # 4. SCAN LOGS & USER ACTION AUDIT TRAIL
 # ----------------------------------------------------------------------
 @router.get("/api/v1/admin/scans")
-async def get_scan_logs(db: Session = Depends(get_db)):
+async def get_scan_logs(
+    limit: int = Query(50, ge=1, le=200, description="Maximum number of scans to return"),
+    offset: int = Query(0, ge=0, description="Number of scans to skip"),
+    db: Session = Depends(get_db)
+):
     try:
-        scans = db.query(models.ScanLog).order_by(models.ScanLog.created_at.desc()).limit(200).all()
+        query = db.query(models.ScanLog)
+        total = query.count()
+        scans = query.order_by(models.ScanLog.created_at.desc()).offset(offset).limit(limit).all()
         data = [{
             "id": s.id,
             "kioskId": s.kiosk_id,
@@ -568,7 +581,17 @@ async def get_scan_logs(db: Session = Depends(get_db)):
             "rawData": s.raw_data,
             "createdAt": s.created_at.isoformat() if s.created_at else None
         } for s in scans]
-        return {"success": True, "count": len(data), "data": data}
+        return {
+            "success": True,
+            "count": len(data),
+            "total": total,
+            "data": data,
+            "pagination": {
+                "total": total,
+                "limit": limit,
+                "offset": offset
+            }
+        }
     except Exception as e:
         logger.error(f"Error fetching scan logs: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -606,7 +629,8 @@ async def get_user_action_logs(
     username: Optional[str] = None,
     kiosk_id: Optional[str] = None,
     action_type: Optional[str] = None,
-    limit: int = Query(250, ge=1, le=1000),
+    limit: int = Query(50, ge=1, le=500, description="Maximum number of actions to return"),
+    offset: int = Query(0, ge=0, description="Number of actions to skip"),
     db: Session = Depends(get_db)
 ):
     try:
@@ -621,7 +645,8 @@ async def get_user_action_logs(
         if action_type:
             query = query.filter(models.UserActionLog.action_type.ilike(f"%{action_type}%"))
 
-        actions = query.order_by(models.UserActionLog.created_at.desc()).limit(limit).all()
+        total = query.count()
+        actions = query.order_by(models.UserActionLog.created_at.desc()).offset(offset).limit(limit).all()
         data = [{
             "id": a.id,
             "kioskId": a.kiosk_id,
@@ -636,10 +661,21 @@ async def get_user_action_logs(
             "ipAddress": a.ip_address,
             "createdAt": a.created_at.isoformat() if a.created_at else None
         } for a in actions]
-        return {"success": True, "count": len(data), "data": data}
+        return {
+            "success": True,
+            "count": len(data),
+            "total": total,
+            "data": data,
+            "pagination": {
+                "total": total,
+                "limit": limit,
+                "offset": offset
+            }
+        }
     except Exception as e:
         logger.error(f"Error fetching action logs: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @router.post("/api/v1/admin/actions/log")
@@ -660,7 +696,7 @@ async def create_user_action_log(
             details=payload.details,
             metadata_json=meta_str,
             ip_address=payload.ip_address,
-            created_at=payload.created_at or datetime.utcnow()
+            created_at=payload.created_at or get_current_time()
         )
         db.add(action)
         db.commit()
@@ -716,7 +752,7 @@ async def batch_user_actions(
                 details=item.details,
                 metadata_json=meta_str,
                 ip_address=item.ip_address,
-                created_at=item.created_at or datetime.utcnow()
+                created_at=item.created_at or get_current_time()
             )
             db.add(action)
             created_count += 1
@@ -836,6 +872,7 @@ async def create_or_update_amenity(
             db.add(poi)
 
         db.commit()
+        pathfinding_engine.invalidate_cache()
 
         # Real-time synchronization broadcast to kiosks
         try:
@@ -859,6 +896,7 @@ async def toggle_amenity_status(poi_id: str, db: Session = Depends(get_db)):
 
         poi.is_active = not (poi.is_active if poi.is_active is not None else True)
         db.commit()
+        pathfinding_engine.invalidate_cache()
 
         try:
             await sio.emit("DIRECTORY_UPDATED", {"type": "poi", "action": "toggle", "id": poi.id, "isActive": poi.is_active})
@@ -881,6 +919,7 @@ async def delete_amenity(poi_id: str, db: Session = Depends(get_db)):
             raise HTTPException(status_code=404, detail="Amenity not found")
         db.delete(poi)
         db.commit()
+        pathfinding_engine.invalidate_cache()
 
         try:
             await sio.emit("DIRECTORY_UPDATED", {"type": "poi", "action": "delete", "id": poi_id})
@@ -1020,6 +1059,7 @@ async def refresh_database_seeds():
     try:
         from app.db.seed.seeder import seed_database
         seed_database(force=False)
+        pathfinding_engine.invalidate_cache()
         try:
             await sio.emit("DIRECTORY_UPDATED", {"type": "all", "action": "refresh"})
         except Exception:

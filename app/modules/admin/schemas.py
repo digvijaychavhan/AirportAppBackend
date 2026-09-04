@@ -4,17 +4,20 @@ Admin Portal Domain Pydantic V2 Schemas
 
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
-class OperatorLoginPayload(BaseModel):
+
+class BaseAdminSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
+
+
+class OperatorLoginPayload(BaseAdminSchema):
     username: Optional[str] = None
     employee_code: Optional[str] = Field(None, alias="employeeCode")
     password: str
 
-    class Config:
-        populate_by_name = True
 
-class OperatorCreatePayload(BaseModel):
+class OperatorCreatePayload(BaseAdminSchema):
     id: Optional[str] = None
     username: Optional[str] = None
     employee_code: Optional[str] = Field(None, alias="employeeCode")
@@ -25,16 +28,16 @@ class OperatorCreatePayload(BaseModel):
     supported_languages: Optional[str] = Field("English, Hindi", alias="supportedLanguages")
     shift: Optional[str] = "Morning (06:00 - 14:00)"
 
-    class Config:
-        populate_by_name = True
 
-class OperatorStatusPayload(BaseModel):
+class OperatorStatusPayload(BaseAdminSchema):
     status: str
 
-class OperatorPasswordPayload(BaseModel):
+
+class OperatorPasswordPayload(BaseAdminSchema):
     password: str
 
-class DevicePayload(BaseModel):
+
+class DevicePayload(BaseAdminSchema):
     id: Optional[str] = None
     device_id: Optional[str] = Field(None, alias="deviceId")
     name: str
@@ -46,10 +49,8 @@ class DevicePayload(BaseModel):
     location: Optional[str] = "Central Concourse"
     status: Optional[str] = "online"
 
-    class Config:
-        populate_by_name = True
 
-class ScanLogCreatePayload(BaseModel):
+class ScanLogCreatePayload(BaseAdminSchema):
     kiosk_id: Optional[str] = Field("T3-L1-K04", alias="kioskId")
     passenger_name: Optional[str] = Field(None, alias="passengerName")
     flight_number: Optional[str] = Field(None, alias="flightNumber")
@@ -60,10 +61,8 @@ class ScanLogCreatePayload(BaseModel):
     failure_reason: Optional[str] = Field(None, alias="failureReason")
     raw_data: Optional[str] = Field(None, alias="rawData")
 
-    class Config:
-        populate_by_name = True
 
-class UserActionLogCreatePayload(BaseModel):
+class UserActionLogCreatePayload(BaseAdminSchema):
     kiosk_id: Optional[str] = Field("T3-L1-K04", alias="kioskId")
     username: Optional[str] = None  # Logged-in passenger name / username; None for Guest
     session_id: Optional[str] = Field(None, alias="sessionId")
@@ -75,35 +74,29 @@ class UserActionLogCreatePayload(BaseModel):
     ip_address: Optional[str] = Field(None, alias="ipAddress")
     created_at: Optional[datetime] = Field(None, alias="createdAt")
 
-    class Config:
-        populate_by_name = True
 
-class BatchUserActionsPayload(BaseModel):
+class BatchUserActionsPayload(BaseAdminSchema):
     kiosk_id: Optional[str] = Field("T3-L1-K04", alias="kioskId")
     actions: List[UserActionLogCreatePayload] = []
 
-    class Config:
-        populate_by_name = True
 
-class KioskTelemetryHeartbeatPayload(BaseModel):
+class KioskTelemetryHeartbeatPayload(BaseAdminSchema):
     kiosk_id: str = Field("T3-L1-K04", alias="kioskId")
     scanner_connected: bool = Field(True, alias="scannerConnected")
     scanner_working: str = Field("OK", alias="scannerWorking")  # OK, ERROR, DISCONNECTED
     camera_connected: bool = Field(True, alias="cameraConnected")
     camera_working: str = Field("OK", alias="cameraWorking")  # OK, ERROR, DISCONNECTED
     network_bandwidth_mbps: float = Field(100.0, alias="networkBandwidthMbps")
-    cpu_pct: float = Field(18.0, alias="cpuPct")
-    ram_used_mb: float = Field(2048.0, alias="ramUsedMb")
-    ram_total_mb: float = Field(8192.0, alias="ramTotalMb")
-    ram_pct: float = Field(25.0, alias="ramPct")
-    ping_ms: Optional[int] = Field(12, alias="pingMs")
+    cpu_pct: float = Field(18.0, ge=0.0, le=100.0, alias="cpuPct")
+    ram_used_mb: float = Field(2048.0, ge=0.0, alias="ramUsedMb")
+    ram_total_mb: float = Field(8192.0, ge=0.0, alias="ramTotalMb")
+    ram_pct: float = Field(25.0, ge=0.0, le=100.0, alias="ramPct")
+    ping_ms: Optional[int] = Field(12, ge=0, alias="pingMs")
     ip_address: Optional[str] = Field(None, alias="ipAddress")
     status: Optional[str] = "online"
 
-    class Config:
-        populate_by_name = True
 
-class AmenityPayload(BaseModel):
+class AmenityPayload(BaseAdminSchema):
     id: Optional[str] = None
     name: str
     category: str
@@ -122,10 +115,8 @@ class AmenityPayload(BaseModel):
     y_coord: Optional[float] = Field(None, alias="yCoord")
     is_active: Optional[bool] = Field(True, alias="isActive")
 
-    class Config:
-        populate_by_name = True
 
-class CategoryPayload(BaseModel):
+class CategoryPayload(BaseAdminSchema):
     id: Optional[str] = None
     title: str
     description: str
@@ -137,6 +128,3 @@ class CategoryPayload(BaseModel):
     subcategories: Optional[List[Dict[str, Any]]] = None
     subcategories_json: Optional[str] = Field(None, alias="subcategoriesJson")
     is_active: Optional[bool] = Field(True, alias="isActive")
-
-    class Config:
-        populate_by_name = True

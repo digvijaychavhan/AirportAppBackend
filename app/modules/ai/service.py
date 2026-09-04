@@ -137,10 +137,12 @@ async def parse_ai_intent(transcript: str, kiosk_context: Optional[Dict[str, Any
         from app.core.database import SessionLocal
         import app.db.models as models
         db = SessionLocal()
-        pois = db.query(models.Poi).filter(models.Poi.is_active == True).all()
-        if pois:
-            poi_names_str = ", ".join([p.name for p in pois[:30]])
-        db.close()
+        try:
+            pois = db.query(models.Poi).filter(models.Poi.is_active == True).all()
+            if pois:
+                poi_names_str = ", ".join([p.name for p in pois[:30]])
+        finally:
+            db.close()
     except Exception as dbe:
         logger.warning(f"Could not load POIs for AI prompt context: {dbe}")
 
@@ -160,10 +162,10 @@ async def parse_ai_intent(transcript: str, kiosk_context: Optional[Dict[str, Any
         return fallback_intent_parser(transcript, kiosk_context)
 
     try:
-        from groq import Groq
-        client = Groq(api_key=groq_api_key)
+        from groq import AsyncGroq
+        client = AsyncGroq(api_key=groq_api_key)
 
-        completion = client.chat.completions.create(
+        completion = await client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": system_prompt},

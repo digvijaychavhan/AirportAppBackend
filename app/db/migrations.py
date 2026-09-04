@@ -95,13 +95,42 @@ def run_migrations():
                 cat_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(wayfinding_categories);")).fetchall()]
                 if cat_cols:
                     if "subcategories_json" not in cat_cols:
-                        conn.execute(text("ALTER TABLE wayfinding_categories ADD COLUMN subcategories_json TEXT;"))
+                        conn.execute(text("ALTER TABLE wayfinding_categories ADD COLUMN subcategories_json JSON;"))
                         logger.info("Database migration: added subcategories_json to wayfinding_categories")
                     conn.commit()
             except Exception as e:
                 logger.warning(f"Notice on wayfinding_categories migration: {e}")
 
+            # User Action Logs column migrations
+            try:
+                ual_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(user_action_logs);")).fetchall()]
+                if ual_cols:
+                    if "metadata_json" not in ual_cols:
+                        conn.execute(text("ALTER TABLE user_action_logs ADD COLUMN metadata_json JSON;"))
+                        logger.info("Database migration: added metadata_json to user_action_logs")
+                    if "created_at" not in ual_cols:
+                        conn.execute(text("ALTER TABLE user_action_logs ADD COLUMN created_at DATETIME;"))
+                        logger.info("Database migration: added created_at to user_action_logs")
+                    conn.commit()
+            except Exception as e:
+                logger.warning(f"Notice on user_action_logs migration: {e}")
+
+            # Screen Annotations column migrations
+            try:
+                sa_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(screen_annotations);")).fetchall()]
+                if sa_cols:
+                    if "stroke_data" not in sa_cols:
+                        conn.execute(text("ALTER TABLE screen_annotations ADD COLUMN stroke_data JSON;"))
+                        logger.info("Database migration: added stroke_data to screen_annotations")
+                    if "created_at" not in sa_cols:
+                        conn.execute(text("ALTER TABLE screen_annotations ADD COLUMN created_at DATETIME;"))
+                        logger.info("Database migration: added created_at to screen_annotations")
+                    conn.commit()
+            except Exception as e:
+                logger.warning(f"Notice on screen_annotations migration: {e}")
+
         logger.info("Database schema migration verification completed.")
+
     except Exception as e:
         logger.error(f"Error during migration execution: {e}")
 

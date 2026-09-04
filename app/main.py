@@ -30,6 +30,10 @@ async def lifespan(app: FastAPI):
     try:
         run_migrations()
         seed_database(force=False)
+        from app.modules.wayfinding.service import pathfinding_engine
+        pathfinding_engine.get_or_build_graph(accessibility_mode="elevator")
+        pathfinding_engine.get_or_build_graph(accessibility_mode="escalator")
+        logger.info("Pathfinding graphs pre-warmed successfully")
     except Exception as e:
         logger.error(f"Startup database initialization warning: {e}")
     yield

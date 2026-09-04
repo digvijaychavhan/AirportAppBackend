@@ -3,7 +3,9 @@ Support & Operator Call Queue REST Endpoints
 """
 
 import os
+import re
 import uuid
+import asyncio
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -12,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.logging import logger
 from app.core.config import settings
+from app.core.timezone import get_current_time, get_current_iso
 import app.db.models as models
 from app.modules.support.schemas import (
     CallRequestPayload,
@@ -43,7 +46,7 @@ async def place_call_request(payload: CallRequestPayload):
         "adaPriority": payload.ada_priority,
         "language": payload.language,
         "status": "QUEUED",
-        "enqueueTimestamp": datetime.utcnow().isoformat()
+        "enqueueTimestamp": get_current_iso()
     }
 
     active_calls[call_id] = call_data
@@ -74,7 +77,8 @@ async def get_active_call_queue():
     return {
         "success": True,
         "totalQueued": len(call_queue),
-        "queue": call_queue
+        "queue": call_queue,
+        "data": call_queue
     }
 
 
@@ -109,7 +113,7 @@ async def accept_call(payload: AcceptCallPayload):
 
     session["status"] = "IN_PROGRESS"
     session["operatorId"] = payload.operator_id
-    session["startTime"] = datetime.utcnow().isoformat()
+    session["startTime"] = get_current_iso()
 
     global call_queue
     call_queue[:] = [c for c in call_queue if c.get("callId") != call_id]
@@ -390,10 +394,12 @@ async def get_operator_logs(
     operator_id: Optional[str] = Query(None),
     scope: str = Query("me"),
     timeFilter: Optional[str] = Query(""),
+    limit: int = Query(50, ge=1, le=200, description="Maximum number of logs to return"),
+    offset: int = Query(0, ge=0, description="Number of logs to skip"),
     db: Session = Depends(get_db)
 ):
     """
-    Returns historical call logs with filtering by operator and time horizon.
+    Returns historical call logs with filtering by operator, time horizon, and pagination.
     """
     try:
         raw_op_id = operatorId or operator_id
@@ -409,7 +415,7 @@ async def get_operator_logs(
             actual_op_id = op.id if op else raw_op_id
             query = query.filter(models.SupportCall.operator_id == actual_op_id)
 
-        now = datetime.utcnow()
+        now = get_current_time()
         if time_filter == "today":
             start_of_today = datetime(now.year, now.month, now.day)
             query = query.filter(models.SupportCall.created_at >= start_of_today)
@@ -424,7 +430,8 @@ async def get_operator_logs(
             start_of_week = now - timedelta(days=7)
             query = query.filter(models.SupportCall.created_at >= start_of_week)
 
-        calls = query.order_by(models.SupportCall.created_at.desc()).all()
+        total = query.count()
+        calls = query.order_by(models.SupportCall.created_at.desc()).offset(offset).limit(limit).all()
         rec_dir = get_recordings_dir()
 
         logs = []
@@ -464,13 +471,24 @@ async def get_operator_logs(
                 "operatorCode": op_code
             })
 
-        return {"success": True, "count": len(logs), "data": logs}
+        return {
+            "success": True,
+            "count": len(logs),
+            "total": total,
+            "data": logs,
+            "pagination": {
+                "total": total,
+                "limit": limit,
+                "offset": offset
+            }
+        }
     except Exception as e:
         logger.error(f"Error fetching logs: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"success": False, "message": str(e)}
         )
+
 
 
 @router.post("/api/v1/operator/call/{call_id}/recording")
@@ -482,8 +500,11 @@ async def upload_call_recording(
     """
     Accepts WebM/MP4 media blob from frontend and attaches recording to SupportCall DB record.
     """
-    if not call_id:
-        raise HTTPException(status_code=400, detail="call_id parameter required")
+    if not call_id or not re.match(r"^[a-zA-Z0-9_\-]+$", call_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid call_id parameter. Must contain only alphanumeric characters, underscores, and hyphens."
+        )
 
     try:
         content_type = request.headers.get("content-type", "")
@@ -505,8 +526,12 @@ async def upload_call_recording(
 
         rec_dir = get_recordings_dir()
         dest_path = os.path.join(rec_dir, filename)
-        with open(dest_path, "wb") as f:
-            f.write(file_bytes)
+
+        def write_file_sync(path: str, data: bytes):
+            with open(path, "wb") as f:
+                f.write(data)
+
+        await asyncio.to_thread(write_file_sync, dest_path, file_bytes)
 
         rel_url = f"/recordings/{filename}"
 
@@ -536,6 +561,8 @@ async def upload_call_recording(
             "recordingUrl": rel_url,
             "sizeBytes": len(file_bytes)
         }
+    except HTTPException:
+        raise
     except Exception as e:
         db.rollback()
         logger.error(f"Error uploading recording: {e}")
@@ -550,6 +577,12 @@ async def download_recording(call_id: str):
     """
     Streams call recording file for playback or download.
     """
+    if not call_id or not re.match(r"^[a-zA-Z0-9_\-]+$", call_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid call_id parameter."
+        )
+
     rec_dir = get_recordings_dir()
     filename = f"{call_id}.webm"
     file_path = os.path.join(rec_dir, filename)

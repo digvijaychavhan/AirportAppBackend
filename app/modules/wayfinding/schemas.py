@@ -3,18 +3,21 @@ Wayfinding Domain Pydantic V2 Schemas
 """
 
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
-class RouteRequestPayload(BaseModel):
-    origin_node_id: Optional[str] = Field("node_kiosk_t3_l1_04", alias="originNodeId", description="Origin node ID", example="node_kiosk_t3_l1_04")
-    destination_poi_id: str = Field(..., alias="destinationPoiId", description="Destination POI or Node ID", example="poi_gate_b12")
-    accessibility_mode: Optional[str] = Field("elevator", alias="accessibilityMode", description="elevator | escalator", example="elevator")
+
+class BaseWayfindingSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
+
+
+class RouteRequestPayload(BaseWayfindingSchema):
+    origin_node_id: Optional[str] = Field("node_kiosk_t3_l1_04", alias="originNodeId", description="Origin node ID", json_schema_extra={"example": "node_kiosk_t3_l1_04"})
+    destination_poi_id: str = Field(..., alias="destinationPoiId", description="Destination POI or Node ID", json_schema_extra={"example": "poi_gate_b12"})
+    accessibility_mode: Optional[str] = Field("elevator", alias="accessibilityMode", description="elevator | escalator", json_schema_extra={"example": "elevator"})
     multi_stops: Optional[List[str]] = Field(default=None, alias="multiStops", description="Optional intermediate stops")
 
-    class Config:
-        populate_by_name = True
 
-class POISchema(BaseModel):
+class POISchema(BaseWayfindingSchema):
     id: str
     name: str
     category: str
@@ -32,13 +35,12 @@ class POISchema(BaseModel):
     badge_variant: Optional[str] = Field("purple", alias="badgeVariant")
     filter: Optional[List[str]] = []
 
-    class Config:
-        populate_by_name = True
 
-class MapNodeUpdateItem(BaseModel):
+class MapNodeUpdateItem(BaseWayfindingSchema):
     id: str
     x: float
     y: float
 
-class MapNodeUpdatePayload(BaseModel):
+
+class MapNodeUpdatePayload(BaseWayfindingSchema):
     nodes: List[MapNodeUpdateItem]

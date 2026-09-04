@@ -7,6 +7,7 @@ from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 from app.db.base import generate_uuid
+from app.core.timezone import get_current_time
 
 class Kiosk(Base):
     __tablename__ = "kiosks"
@@ -18,7 +19,7 @@ class Kiosk(Base):
     current_node_id = Column(String, ForeignKey("map_nodes.id"), nullable=False)
     is_accessible_ada = Column(Boolean, default=True)
     status = Column(String, default="active")
-    last_heartbeat_at = Column(DateTime, default=datetime.utcnow)
+    last_heartbeat_at = Column(DateTime, default=get_current_time)
 
     floor = relationship("MapFloor", back_populates="kiosks")
     current_node = relationship("MapNode")

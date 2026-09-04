@@ -2,13 +2,13 @@
 Customer Support, Operator Workforce & WebRTC Annotation ORM Models
 """
 
-from datetime import datetime
-from sqlalchemy import Column, String, Integer, Boolean, DateTime, Text, ForeignKey
+from sqlalchemy import Column, String, Integer, Boolean, DateTime, Text, ForeignKey, JSON
 from sqlalchemy.orm import relationship
 from app.core.database import Base
-from app.db.base import generate_uuid
+from app.db.base import generate_uuid, TimestampMixin
+from app.core.timezone import get_current_time
 
-class Operator(Base):
+class Operator(Base, TimestampMixin):
     __tablename__ = "operators"
 
     id = Column(String, primary_key=True, default=generate_uuid)
@@ -23,12 +23,11 @@ class Operator(Base):
     avg_handle_time = Column(String, default="2m 30s")
     resolution_rate = Column(String, default="98%")
     shift = Column(String, default="Morning (06:00 - 14:00)")
-    created_at = Column(DateTime, default=datetime.utcnow)
 
     calls = relationship("SupportCall", back_populates="operator")
 
 
-class SupportCall(Base):
+class SupportCall(Base, TimestampMixin):
     __tablename__ = "support_calls"
 
     id = Column(String, primary_key=True, default=generate_uuid)
@@ -46,20 +45,18 @@ class SupportCall(Base):
     pnr = Column(String, nullable=True)
     recording_url = Column(String, nullable=True)
     recording_duration_seconds = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.utcnow)
 
     kiosk = relationship("Kiosk")
     operator = relationship("Operator", back_populates="calls")
     annotations = relationship("ScreenAnnotation", back_populates="call", cascade="all, delete-orphan")
 
 
-class ScreenAnnotation(Base):
+class ScreenAnnotation(Base, TimestampMixin):
     __tablename__ = "screen_annotations"
 
     id = Column(String, primary_key=True, default=generate_uuid)
     call_id = Column(String, ForeignKey("support_calls.id"), nullable=False)
-    stroke_data = Column(Text, nullable=False)  # JSON string of canvas strokes
-    created_at = Column(DateTime, default=datetime.utcnow)
+    stroke_data = Column(JSON, nullable=False)  # JSON structure of canvas strokes
 
     call = relationship("SupportCall", back_populates="annotations")
 
@@ -69,7 +66,7 @@ class QueryTagCategory(Base):
 
     id = Column(String, primary_key=True)  # e.g. "cat1", "cat2"
     name = Column(String, nullable=False)   # e.g. "Accessibility Services"
-    sub_items_json = Column(Text, nullable=True)  # JSON array string, e.g. '["Lost", "Delayed"]'
+    sub_items_json = Column(JSON, nullable=True)  # JSON array or string
     sort_order = Column(Integer, default=0)
     is_active = Column(Boolean, default=True)
 

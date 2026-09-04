@@ -22,19 +22,25 @@ from app.db.seed.data import (
     get_seed_user_action_logs
 )
 
-def seed_database(force: bool = False):
+def seed_database(force: bool = False, session=None, custom_engine=None):
     """
     Seeds initial database tables with domain entities.
     If force=True, drops and recreates all tables.
     Otherwise, performs idempotent upserts across all domain entities.
     """
+    active_engine = custom_engine or engine
     logger.info("Initializing database schema...")
-    if force:
+    if force and not session:
         logger.warning("Force flag enabled: dropping all tables...")
-        Base.metadata.drop_all(bind=engine)
+        Base.metadata.drop_all(bind=active_engine)
 
-    Base.metadata.create_all(bind=engine)
-    db = SessionLocal()
+    if not session:
+        Base.metadata.create_all(bind=active_engine)
+        db = SessionLocal()
+        owns_session = True
+    else:
+        db = session
+        owns_session = False
 
     try:
         # 1. Airlines (Upsert)
@@ -224,7 +230,8 @@ def seed_database(force: bool = False):
         logger.error(f"Error seeding database: {e}")
         db.rollback()
     finally:
-        db.close()
+        if owns_session:
+            db.close()
 
 if __name__ == "__main__":
     force_seed = "--force" in sys.argv or "-f" in sys.argv

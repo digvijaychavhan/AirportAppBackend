@@ -2,12 +2,12 @@
 Passenger Feedback Survey ORM Models
 """
 
-from datetime import datetime
 from sqlalchemy import Column, String, Integer, DateTime, Text
 from app.core.database import Base
-from app.db.base import generate_uuid
+from app.db.base import generate_uuid, TimestampMixin
+from app.core.timezone import get_current_time
 
-class FeedbackSubmission(Base):
+class FeedbackSubmission(Base, TimestampMixin):
     __tablename__ = "feedback_submissions"
 
     id = Column(String, primary_key=True, default=generate_uuid)
@@ -22,7 +22,7 @@ class FeedbackSubmission(Base):
     food_rating = Column(Integer, nullable=False)
     comments = Column(Text, nullable=True)
     contact_phone = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+
 
 
 class FeedbackCategory(Base):

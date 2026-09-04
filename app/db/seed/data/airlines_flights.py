@@ -2,7 +2,8 @@
 Seed Data Fixtures: Airlines & Flights
 """
 
-from datetime import datetime, timedelta
+from datetime import timedelta
+from app.core.timezone import get_current_time
 
 def get_seed_airlines():
     return [
@@ -15,7 +16,7 @@ def get_seed_airlines():
     ]
 
 def get_seed_flights():
-    now = datetime.utcnow()
+    now = get_current_time()
     return [
         {
             "id": "fl_6e2262",

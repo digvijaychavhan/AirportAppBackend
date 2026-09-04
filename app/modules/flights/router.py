@@ -32,10 +32,12 @@ async def search_flights(
     date: Optional[str] = Query(None, description="Filter date in YYYY-MM-DD format"),
     airline: Optional[str] = Query(None, description="Filter by airline code (e.g. 6E, AI)"),
     terminal: Optional[str] = Query(None, description="Filter by terminal (e.g. Terminal 3, T3)"),
+    limit: int = Query(50, ge=1, le=200, description="Number of records to return"),
+    offset: int = Query(0, ge=0, description="Number of records to skip"),
     db: Session = Depends(get_db)
 ):
     """
-    Search flights with live SQL database records and dynamic fallback for search queries.
+    Search flights with live SQL database records, pagination, and dynamic query matching.
     """
     raw_query = query.strip() if query else ""
     clean_q = re.sub(r"\s+", "", raw_query).upper()
@@ -57,7 +59,8 @@ async def search_flights(
     if terminal:
         db_query = db_query.filter(models.Flight.terminal.ilike(f"%{terminal.strip()}%"))
 
-    flights = db_query.all()
+    total = db_query.count()
+    flights = db_query.offset(offset).limit(limit).all()
 
     formatted_flights = []
     for f in flights:
@@ -84,7 +87,18 @@ async def search_flights(
             "delayReason": None
         })
 
-    return {"success": True, "data": formatted_flights}
+    return {
+        "success": True,
+        "count": len(formatted_flights),
+        "total": total,
+        "data": formatted_flights,
+        "pagination": {
+            "total": total,
+            "limit": limit,
+            "offset": offset
+        }
+    }
+
 
 
 @router.post("/api/v1/flights/bcbp-decode")
@@ -258,7 +272,10 @@ async def get_departure_gates(db: Session = Depends(get_db)):
         return {"success": True, "count": len(gates_list), "data": gates_list}
     except Exception as e:
         logger.error(f"Error fetching gates list: {e}")
-        return {"success": False, "message": str(e)}
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "GATES_FETCH_ERROR", "message": str(e)}
+        )
 
 
 @router.get("/api/v1/flights/demo-boarding-pass")
@@ -304,11 +321,11 @@ async def get_demo_boarding_pass():
         }
     except Exception as e:
         logger.error(f"Error generating demo boarding pass: {e}")
-        return {
-            "success": False,
-            "error": str(e),
-            "data": None
-        }
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "DEMO_BCBP_ERROR", "message": str(e)}
+        )
+
 
 
 @router.get("/api/v1/flights/{flight_id}")

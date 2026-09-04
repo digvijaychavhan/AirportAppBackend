@@ -1,11 +1,25 @@
-fastapi
-uvicorn[standard]
-python-socketio
-sqlalchemy
-pydantic
-pydantic-settings
-networkx
-groq
-python-dotenv
-httpx
-pytest
+# FastAPI Core & ASGI Server
+fastapi>=0.115.0,<1.0.0
+uvicorn[standard]>=0.30.0,<1.0.0
+python-multipart>=0.0.9,<1.0.0
+
+# Real-Time WebRTC Signaling
+python-socketio>=5.11.0,<6.0.0
+
+# Database & ORM
+sqlalchemy>=2.0.0,<3.0.0
+
+# Schema Validation & Settings
+pydantic>=2.7.0,<3.0.0
+pydantic-settings>=2.2.0,<3.0.0
+python-dotenv>=1.0.0,<2.0.0
+
+# Spatial Wayfinding Graph
+networkx>=3.2.0,<4.0.0
+
+# AI Intent & Vision OCR
+groq>=0.9.0,<1.0.0
+httpx>=0.27.0,<1.0.0
+
+# Testing Framework
+pytest>=8.0.0,<9.0.0

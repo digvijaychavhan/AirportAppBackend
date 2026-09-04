@@ -2,7 +2,7 @@
 Spatial Wayfinding, Map & POI Directory ORM Models
 """
 
-from sqlalchemy import Column, String, Integer, Float, Boolean, ForeignKey
+from sqlalchemy import Column, String, Integer, Float, Boolean, ForeignKey, JSON
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 from app.db.base import generate_uuid
@@ -89,5 +89,6 @@ class WayfindingCategory(Base):
     icon_color = Column(String, nullable=False, default="#2563EB")
     icon_bg = Column(String, nullable=False, default="#DBEAFE")
     route = Column(String, nullable=False)
-    subcategories_json = Column(String, nullable=True)
+    subcategories_json = Column(JSON, nullable=True)
     is_active = Column(Boolean, default=True)
+

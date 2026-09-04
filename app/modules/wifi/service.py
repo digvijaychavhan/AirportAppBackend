@@ -17,7 +17,7 @@ from app.core.logging import logger
 from app.core.config import settings
 
 try:
-    from groq import Groq
+    from groq import Groq, AsyncGroq
     GROQ_AVAILABLE = True
 except ImportError:
     GROQ_AVAILABLE = False
@@ -171,7 +171,7 @@ async def extract_passport_with_groq_ai(raw_ocr_text: str) -> Tuple[bool, Dict[s
     if not groq_api_key or not GROQ_AVAILABLE:
         return False, {}, "Groq AI is not configured or unavailable."
 
-    client = Groq(api_key=groq_api_key)
+    client = AsyncGroq(api_key=groq_api_key)
     prompt = f"""
 You are an expert official airport security passport verification engine adhering strictly to ICAO Doc 9303 standards.
 Examine this raw OCR text:
@@ -193,7 +193,7 @@ Return ONLY a valid JSON object matching this schema:
 }}
 """
     try:
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
@@ -280,18 +280,22 @@ async def verify_passport_image(
     return False, {"extracted_raw_text": raw_mrz or ""}, "Document Rejected: No valid passport MRZ detected."
 
 
+from app.core.timezone import get_current_time
+
 def generate_wifi_qr_payload(
     passenger_name: str,
     passport_number: str,
     ssid: str = "GMR Free Wi-Fi",
     duration_minutes: int = 45
 ) -> Dict[str, Any]:
-    random_suffix = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
+    import secrets
+    random_suffix = "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(6))
     voucher_code = f"PASS-{random_suffix}"
+
     wifi_password = f"WIFI_{random_suffix}"
     wifi_qr_string = f"WIFI:T:WPA;S:{ssid};P:{wifi_password};H:false;;"
     portal_connect_url = f"https://wifi.airport.local/portal?voucher={voucher_code}&p={passport_number[-4:] if len(passport_number) >= 4 else '0000'}"
-    expires_at = datetime.utcnow() + timedelta(minutes=duration_minutes)
+    expires_at = get_current_time() + timedelta(minutes=duration_minutes)
 
     return {
         "ssid": ssid,
@@ -300,6 +304,6 @@ def generate_wifi_qr_payload(
         "wifi_qr_string": wifi_qr_string,
         "portal_connect_url": portal_connect_url,
         "duration_minutes": duration_minutes,
-        "expires_at": expires_at.isoformat() + "Z",
+        "expires_at": expires_at.isoformat(),
         "security_type": "WPA2-Enterprise / Captive Guest Voucher"
     }

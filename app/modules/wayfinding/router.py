@@ -14,19 +14,25 @@ from app.modules.wayfinding.service import compute_indoor_route, pathfinding_eng
 router = APIRouter(tags=["Indoor Wayfinding"])
 
 @router.post("/api/v1/wayfinding/route")
-async def calculate_wayfinding_route(payload: RouteRequestPayload):
+async def calculate_wayfinding_route(
+    payload: RouteRequestPayload,
+    db: Session = Depends(get_db)
+):
     """
     Computes optimal multi-floor indoor walking route using NetworkX Dijkstra algorithm.
     """
     try:
         origin = payload.origin_node_id or "node_kiosk_t3_l1_04"
         dest = payload.destination_poi_id
+        if not dest or not dest.strip():
+            raise ValueError("Destination POI ID cannot be empty.")
         mode = payload.accessibility_mode or "elevator"
         result = compute_indoor_route(
             origin_node_id=origin,
             destination_poi_id=dest,
             accessibility_mode=mode,
-            multi_stops=payload.multi_stops
+            multi_stops=payload.multi_stops,
+            db=db
         )
         return result
     except ValueError as ve:
@@ -45,12 +51,13 @@ async def calculate_wayfinding_route(payload: RouteRequestPayload):
 @router.get("/api/v1/wayfinding/pois")
 async def get_airport_pois(
     category: Optional[str] = Query(None, description="dining, shopping, lounges, services, amenities, gates"),
-    floor: Optional[str] = Query(None, description="L1, L2, Ground")
+    floor: Optional[str] = Query(None, description="L1, L2, Ground"),
+    db: Session = Depends(get_db)
 ):
     """
     Retrieves POIs with coordinates and metadata.
     """
-    pois = pathfinding_engine.get_pois(category=category, floor=floor)
+    pois = pathfinding_engine.get_pois(category=category, floor=floor, db=db)
     return {"success": True, "count": len(pois), "data": pois}
 
 
@@ -87,10 +94,18 @@ async def get_poi_by_id(poi_id: str, db: Session = Depends(get_db)):
                     "image": poi.image_url or ""
                 }
             }
-        return {"success": False, "message": "POI not found"}
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "POI_NOT_FOUND", "message": f"POI '{poi_id}' not found"}
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error fetching POI {poi_id}: {e}")
-        return {"success": False, "message": str(e)}
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "POI_FETCH_ERROR", "message": str(e)}
+        )
 
 
 
@@ -125,7 +140,11 @@ async def get_public_wayfinding_categories(db: Session = Depends(get_db)):
         return {"success": True, "count": len(data), "data": data}
     except Exception as e:
         logger.error(f"Error fetching wayfinding categories: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "CATEGORIES_FETCH_ERROR", "message": str(e)}
+        )
+
 
 
 @router.get("/api/v1/directory")
@@ -259,6 +278,7 @@ async def update_map_nodes(
                 db_node.y_coord = float(n.y)
 
         db.commit()
+        pathfinding_engine.invalidate_cache()
         return {"success": True, "message": "Nodes updated successfully"}
     except Exception as e:
         db.rollback()

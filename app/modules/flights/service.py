@@ -64,17 +64,17 @@ def get_airline_info(code: str) -> Dict[str, Any]:
     try:
         from app.core.database import SessionLocal
         db = SessionLocal()
-        airline = db.query(models.Airline).filter(models.Airline.code == clean_code).first()
-        if airline:
-            res = {
-                "code": airline.code,
-                "name": airline.name,
-                "logoUrl": airline.logo_url or "/logos/indigo.png",
-                "defaultTerminal": "T3" if airline.flight_type == "international" else "T2"
-            }
+        try:
+            airline = db.query(models.Airline).filter(models.Airline.code == clean_code).first()
+            if airline:
+                return {
+                    "code": airline.code,
+                    "name": airline.name,
+                    "logoUrl": airline.logo_url or "/logos/indigo.png",
+                    "defaultTerminal": "T3" if airline.flight_type == "international" else "T2"
+                }
+        finally:
             db.close()
-            return res
-        db.close()
     except Exception as e:
         logger.warning(f"Error querying Airline table: {e}")
 
@@ -89,16 +89,16 @@ def get_airport_info(iata: str) -> Dict[str, Any]:
     try:
         from app.core.database import SessionLocal
         db = SessionLocal()
-        airport = db.query(models.Airport).filter(models.Airport.iata_code == clean_iata).first()
-        if airport:
-            res = {
-                "city": airport.city,
-                "name": airport.name,
-                "country": airport.country
-            }
+        try:
+            airport = db.query(models.Airport).filter(models.Airport.iata_code == clean_iata).first()
+            if airport:
+                return {
+                    "city": airport.city,
+                    "name": airport.name,
+                    "country": airport.country
+                }
+        finally:
             db.close()
-            return res
-        db.close()
     except Exception as e:
         logger.warning(f"Error querying Airport table: {e}")
 
@@ -123,11 +123,13 @@ def clean_seat_number(seat_raw: str) -> str:
     cleaned = seat_raw.strip()
     return re.sub(r"^0+", "", cleaned) or cleaned
 
+from app.core.timezone import get_current_year
+
 def parse_julian_date(julian_str: str, year: Optional[int] = None) -> Dict[str, Any]:
     if not julian_str or not julian_str.isdigit():
         return {"day": None, "formatted": None, "iso": None}
     try:
-        current_year = year or datetime.utcnow().year
+        current_year = year or get_current_year()
         day_num = int(julian_str)
         date_obj = datetime(current_year, 1, 1) + timedelta(days=day_num - 1)
         return {

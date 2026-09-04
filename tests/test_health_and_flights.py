@@ -62,3 +62,14 @@ def test_transfer_shuttles():
     data = response.json()
     assert data["success"] is True
     assert len(data["data"]) >= 3
+
+def test_flights_pagination():
+    response = client.get("/api/v1/flights/search?limit=2&offset=0")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert "pagination" in data
+    assert data["pagination"]["limit"] == 2
+    assert data["pagination"]["offset"] == 0
+    assert len(data["data"]) <= 2
+

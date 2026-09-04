@@ -4,19 +4,21 @@ Flights Domain Pydantic V2 Schemas
 
 from typing import Optional, Dict, Any, List
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
-class AirlineSchema(BaseModel):
+
+class BaseFlightSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
+
+
+class AirlineSchema(BaseFlightSchema):
     code: str
     name: str
     logo_url: Optional[str] = Field(None, alias="logoUrl")
     flight_type: Optional[str] = Field(default="domestic", alias="flightType")
 
-    class Config:
-        populate_by_name = True
-        from_attributes = True
 
-class FlightResponse(BaseModel):
+class FlightResponse(BaseFlightSchema):
     id: str
     flight_number: str = Field(..., alias="flightNumber")
     airline_code: str = Field(..., alias="airlineCode")
@@ -33,19 +35,14 @@ class FlightResponse(BaseModel):
     status: str
     delay_reason: Optional[str] = Field(None, alias="delayReason")
 
-    class Config:
-        populate_by_name = True
-        from_attributes = True
 
-class BCBPDecodeRequest(BaseModel):
+class BCBPDecodeRequest(BaseFlightSchema):
     raw_bcbp: Optional[str] = Field(None, alias="rawBarcode", description="IATA BCBP raw barcode string (PDF417 / Aztec)")
     barcode: Optional[str] = None
     kiosk_id: Optional[str] = Field(default="T3-L1-K04", alias="kioskId")
 
-    class Config:
-        populate_by_name = True
 
-class BCBPDecodeData(BaseModel):
+class BCBPDecodeData(BaseFlightSchema):
     passenger_name: str = Field(..., alias="passengerName")
     pnr: str
     flight_number: str = Field(..., alias="flightNumber")
@@ -65,14 +62,13 @@ class BCBPDecodeData(BaseModel):
     status: str = "ON TIME"
     raw_barcode: Optional[str] = Field(None, alias="rawBarcode")
 
-    class Config:
-        populate_by_name = True
 
-class BCBPDecodeResponse(BaseModel):
+class BCBPDecodeResponse(BaseFlightSchema):
     success: bool = True
     data: BCBPDecodeData
 
-class BaggageBeltResponse(BaseModel):
+
+class BaggageBeltResponse(BaseFlightSchema):
     id: str
     carousel: str
     flightNumber: str
@@ -81,7 +77,8 @@ class BaggageBeltResponse(BaseModel):
     status: str
     location: str
 
-class ShuttleScheduleResponse(BaseModel):
+
+class ShuttleScheduleResponse(BaseFlightSchema):
     id: str
     route: str
     frequencyMinutes: int

@@ -3,16 +3,19 @@ Seed Data Fixtures: Operators, Scan Logs & User Action Audit Logs
 """
 
 import json
-from datetime import datetime, timedelta
+from datetime import timedelta
+from app.core.security import hash_password
+from app.core.timezone import get_current_time
 
 def get_seed_operators():
+    default_hashed_pw = hash_password("operator123")
     return [
         {
             "id": "op_101",
             "username": "maya.l",
             "employee_code": "EMP-7840",
             "name": "Maya L.",
-            "password": "operator123",
+            "password": default_hashed_pw,
             "role": "Customer Support Executive",
             "status": "available",
             "supported_languages": "English, Hindi, Punjabi",
@@ -26,7 +29,7 @@ def get_seed_operators():
             "username": "priya.sharma",
             "employee_code": "EMP-9021",
             "name": "Priya Sharma",
-            "password": "operator123",
+            "password": default_hashed_pw,
             "role": "Passenger Assistance Specialist",
             "status": "available",
             "supported_languages": "English, Hindi, Tamil",
@@ -40,7 +43,7 @@ def get_seed_operators():
             "username": "rahul.verma",
             "employee_code": "EMP-9022",
             "name": "Rahul Verma",
-            "password": "operator123",
+            "password": default_hashed_pw,
             "role": "Accessibility & ADA Officer",
             "status": "offline",
             "supported_languages": "English, Hindi, Marathi",
@@ -54,7 +57,7 @@ def get_seed_operators():
             "username": "ananya.patel",
             "employee_code": "EMP-9023",
             "name": "Ananya Patel",
-            "password": "operator123",
+            "password": default_hashed_pw,
             "role": "Customer Support Executive",
             "status": "available",
             "supported_languages": "English, Gujarati, Hindi",
@@ -66,7 +69,7 @@ def get_seed_operators():
     ]
 
 def get_seed_scan_logs():
-    now = datetime.utcnow()
+    now = get_current_time()
     return [
         {
             "kiosk_id": "T3-L1-K04",
@@ -131,7 +134,7 @@ def get_seed_scan_logs():
     ]
 
 def get_seed_user_action_logs():
-    now = datetime.utcnow()
+    now = get_current_time()
     return [
         {
             "kiosk_id": "T3-L1-K04",

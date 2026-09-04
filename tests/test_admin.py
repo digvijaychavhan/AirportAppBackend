@@ -41,3 +41,19 @@ def test_admin_amenities():
     assert response.status_code == 200
     data = response.json()
     assert data["success"] is True
+
+def test_admin_scans_and_actions_pagination():
+    response = client.get("/api/v1/admin/scans?limit=5&offset=0")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert "pagination" in data
+    assert data["pagination"]["limit"] == 5
+
+    response_actions = client.get("/api/v1/admin/actions?limit=5&offset=0")
+    assert response_actions.status_code == 200
+    data_actions = response_actions.json()
+    assert data_actions["success"] is True
+    assert "pagination" in data_actions
+    assert data_actions["pagination"]["limit"] == 5
+

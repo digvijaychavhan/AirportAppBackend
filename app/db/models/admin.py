@@ -2,12 +2,12 @@
 Device Fleet, Scan Logs & User Action Audit ORM Models
 """
 
-from datetime import datetime
-from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, Text
+from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, Text, JSON
 from app.core.database import Base
-from app.db.base import generate_uuid
+from app.db.base import generate_uuid, TimestampMixin
+from app.core.timezone import get_current_time
 
-class Device(Base):
+class Device(Base, TimestampMixin):
     __tablename__ = "devices"
 
     id = Column(String, primary_key=True, default=generate_uuid)
@@ -40,11 +40,10 @@ class Device(Base):
     network_bandwidth_mbps = Column(Float, default=100.0)
     ping_ms = Column(Integer, default=12)
     
-    last_heartbeat = Column(DateTime, default=datetime.utcnow)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    last_heartbeat = Column(DateTime, default=get_current_time)
 
 
-class ScanLog(Base):
+class ScanLog(Base, TimestampMixin):
     __tablename__ = "scan_logs"
 
     id = Column(String, primary_key=True, default=generate_uuid)
@@ -57,10 +56,9 @@ class ScanLog(Base):
     scan_result = Column(String, nullable=False, default="SUCCESS")  # SUCCESS, FAILED
     failure_reason = Column(String, nullable=True)
     raw_data = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
 
 
-class UserActionLog(Base):
+class UserActionLog(Base, TimestampMixin):
     __tablename__ = "user_action_logs"
 
     id = Column(String, primary_key=True, default=generate_uuid)
@@ -71,6 +69,6 @@ class UserActionLog(Base):
     target_element = Column(String, nullable=True)  # Button label, link, chip name, etc.
     route = Column(String, nullable=True)  # Current route e.g. /eat-dine, /wayfinding/shopping
     details = Column(String, nullable=True)
-    metadata_json = Column(Text, nullable=True)
+    metadata_json = Column(JSON, nullable=True)
     ip_address = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+

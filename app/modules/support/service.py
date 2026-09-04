@@ -11,11 +11,15 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 from app.core.logging import logger
 from app.core.config import settings
+from app.core.timezone import get_current_time, get_current_iso
 
 # Initialize Socket.IO Async Server
 sio = socketio.AsyncServer(
     async_mode="asgi",
     cors_allowed_origins="*",
+    ping_timeout=10,
+    ping_interval=5,
+    max_http_buffer_size=10_000_000,
     logger=False,
     engineio_logger=False
 )
@@ -26,6 +30,57 @@ connected_clients: Dict[str, Dict[str, Any]] = {}
 call_queue: List[Dict[str, Any]] = []
 online_operators: Dict[str, Dict[str, Any]] = {}
 online_kiosks: Dict[str, Dict[str, Any]] = {}
+
+
+async def cleanup_ghost_connections(timeout_seconds: int = 120) -> Dict[str, int]:
+    """
+    Audits active sockets, operators, kiosks, and queues to eliminate stale/ghost connections.
+    """
+    global call_queue
+    now_ts = get_current_time().timestamp()
+    cleaned_ops = 0
+    cleaned_kiosks = 0
+    cleaned_calls = 0
+
+    # 1. Audit operators with dead sockets or stale state
+    for op_id, op_data in list(online_operators.items()):
+        sid = op_data.get("sid")
+        if sid and sid not in connected_clients:
+            op_data["sid"] = None
+            op_data["status"] = "OFFLINE"
+            cleaned_ops += 1
+
+    # 2. Audit kiosks with timed out heartbeats
+    for kiosk_id, kiosk_data in list(online_kiosks.items()):
+        last_seen = kiosk_data.get("lastSeen", 0)
+        sid = kiosk_data.get("sid")
+        if (sid and sid not in connected_clients) or (now_ts - last_seen > timeout_seconds):
+            online_kiosks.pop(kiosk_id, None)
+            cleaned_kiosks += 1
+
+    # 3. Clean stale calls waiting in queue whose kiosk disconnected
+    active_kiosk_sids = set(connected_clients.keys())
+    valid_calls = []
+    for call in call_queue:
+        ksid = call.get("kioskSid")
+        if ksid and ksid not in active_kiosk_sids and call.get("status") == "QUEUED":
+            cid = call.get("callId")
+            if cid in active_calls and active_calls[cid].get("status") == "QUEUED":
+                active_calls.pop(cid, None)
+            cleaned_calls += 1
+        else:
+            valid_calls.append(call)
+    call_queue = valid_calls
+
+    if cleaned_ops > 0 or cleaned_kiosks > 0 or cleaned_calls > 0:
+        await broadcast_admin_telemetry()
+
+    return {
+        "cleaned_operators": cleaned_ops,
+        "cleaned_kiosks": cleaned_kiosks,
+        "cleaned_calls": cleaned_calls
+    }
+
 
 def get_recordings_dir() -> str:
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -48,21 +103,22 @@ def get_operator_info(operator_id: str) -> Dict[str, str]:
         from app.core.database import SessionLocal
         import app.db.models as models
         db = SessionLocal()
-        op = db.query(models.Operator).filter(
-            (models.Operator.id == operator_id) |
-            (models.Operator.username == operator_id) |
-            (models.Operator.employee_code == operator_id) |
-            (models.Operator.name == operator_id)
-        ).first()
-        if op:
-            role_title = op.role.replace("_", " ").title() if op.role else "Customer Support Executive"
-            info = {"id": op.id, "name": op.name, "role": role_title}
+        try:
+            op = db.query(models.Operator).filter(
+                (models.Operator.id == operator_id) |
+                (models.Operator.username == operator_id) |
+                (models.Operator.employee_code == operator_id) |
+                (models.Operator.name == operator_id)
+            ).first()
+            if op:
+                role_title = op.role.replace("_", " ").title() if op.role else "Customer Support Executive"
+                return {"id": op.id, "name": op.name, "role": role_title}
+        finally:
             db.close()
-            return info
-        db.close()
     except Exception as e:
         logger.error(f"Error getting operator info: {e}")
     return {"id": operator_id, "name": operator_id, "role": "Customer Support Executive"}
+
 
 
 def get_longest_idle_available_operator(exclude_op_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
@@ -82,7 +138,7 @@ async def dispatch_call_to_operator(call_data: Dict[str, Any], target_op: Dict[s
         return
 
     call_id = call_data["callId"]
-    ring_start = call_data.get("ringStartTime") or datetime.utcnow().isoformat()
+    ring_start = call_data.get("ringStartTime") or get_current_iso()
     call_data["ringStartTime"] = ring_start
     call_data["allocatedOperatorId"] = target_op["operatorId"]
 
@@ -147,63 +203,65 @@ def auto_save_support_call(call_id: str, session: Optional[Dict[str, Any]], dura
         from app.core.database import SessionLocal
         import app.db.models as models
         db = SessionLocal()
+        try:
+            recordings_dir = get_recordings_dir()
+            rec_url = (session or {}).get("recordingUrl")
+            if not rec_url:
+                if os.path.exists(os.path.join(recordings_dir, f"{call_id}.webm")):
+                    rec_url = f"/recordings/{call_id}.webm"
+                elif os.path.exists(os.path.join(recordings_dir, f"{call_id}.mp4")):
+                    rec_url = f"/recordings/{call_id}.mp4"
 
-        recordings_dir = get_recordings_dir()
-        rec_url = (session or {}).get("recordingUrl")
-        if not rec_url:
-            if os.path.exists(os.path.join(recordings_dir, f"{call_id}.webm")):
-                rec_url = f"/recordings/{call_id}.webm"
-            elif os.path.exists(os.path.join(recordings_dir, f"{call_id}.mp4")):
-                rec_url = f"/recordings/{call_id}.mp4"
+            existing = db.query(models.SupportCall).filter(models.SupportCall.id == call_id).first()
+            kiosk_id = (session or {}).get("kioskId", "T3-L1-K04")
+            kiosk_obj = db.query(models.Kiosk).filter((models.Kiosk.id == kiosk_id) | (models.Kiosk.code == kiosk_id)).first()
+            kiosk_db_id = kiosk_obj.id if kiosk_obj else "T3-L1-K04"
 
-        existing = db.query(models.SupportCall).filter(models.SupportCall.id == call_id).first()
-        kiosk_id = (session or {}).get("kioskId", "T3-L1-K04")
-        kiosk_obj = db.query(models.Kiosk).filter((models.Kiosk.id == kiosk_id) | (models.Kiosk.code == kiosk_id)).first()
-        kiosk_db_id = kiosk_obj.id if kiosk_obj else "T3-L1-K04"
+            raw_op_id = (session or {}).get("operatorId")
+            op_id = None
+            if raw_op_id:
+                op_match = db.query(models.Operator).filter(
+                    (models.Operator.id == raw_op_id) | (models.Operator.username == raw_op_id) | (models.Operator.employee_code == raw_op_id)
+                ).first()
+                op_id = op_match.id if op_match else raw_op_id
 
-        raw_op_id = (session or {}).get("operatorId")
-        op_id = None
-        if raw_op_id:
-            op_match = db.query(models.Operator).filter(
-                (models.Operator.id == raw_op_id) | (models.Operator.username == raw_op_id) | (models.Operator.employee_code == raw_op_id)
-            ).first()
-            op_id = op_match.id if op_match else raw_op_id
+            passenger_name = (session or {}).get("passengerName") or ""
+            flight_number = (session or {}).get("flightNumber") or ""
+            pnr = (session or {}).get("pnr") or ""
 
-        passenger_name = (session or {}).get("passengerName") or ""
-        flight_number = (session or {}).get("flightNumber") or ""
-        pnr = (session or {}).get("pnr") or ""
+            if existing:
+                existing.call_duration_seconds = max(1, duration_seconds) if duration_seconds > 0 else existing.call_duration_seconds
+                existing.status = "ended"
+                if op_id:
+                    existing.operator_id = op_id
+                if passenger_name:
+                    existing.passenger_name = passenger_name
+                if flight_number:
+                    existing.flight_number = flight_number
+                if rec_url and not existing.recording_url:
+                    existing.recording_url = rec_url
 
-        if existing:
-            existing.call_duration_seconds = max(1, duration_seconds) if duration_seconds > 0 else existing.call_duration_seconds
-            existing.status = "ended"
-            if op_id:
-                existing.operator_id = op_id
-            if passenger_name:
-                existing.passenger_name = passenger_name
-            if flight_number:
-                existing.flight_number = flight_number
-            if rec_url and not existing.recording_url:
-                existing.recording_url = rec_url
-            db.commit()
-            logger.info(f"Auto-save updated support call {call_id}")
-        else:
-            new_call = models.SupportCall(
-                id=call_id,
-                kiosk_id=kiosk_db_id,
-                operator_id=op_id,
-                status="ended",
-                call_duration_seconds=max(1, duration_seconds),
-                issue_category="General Inquiry",
-                operator_notes="Assisted passenger at kiosk.",
-                passenger_name=passenger_name,
-                flight_number=flight_number,
-                pnr=pnr,
-                recording_url=rec_url
-            )
-            db.add(new_call)
-            db.commit()
-            logger.info(f"Auto-saved new support call record {call_id}")
-        db.close()
+                db.commit()
+                logger.info(f"Auto-save updated support call {call_id}")
+            else:
+                new_call = models.SupportCall(
+                    id=call_id,
+                    kiosk_id=kiosk_db_id,
+                    operator_id=op_id,
+                    status="ended",
+                    call_duration_seconds=max(1, duration_seconds),
+                    issue_category="General Inquiry",
+                    operator_notes="Assisted passenger at kiosk.",
+                    passenger_name=passenger_name,
+                    flight_number=flight_number,
+                    pnr=pnr,
+                    recording_url=rec_url
+                )
+                db.add(new_call)
+                db.commit()
+                logger.info(f"Auto-saved new support call record {call_id}")
+        finally:
+            db.close()
     except Exception as e:
         logger.error(f"Error auto-saving support call {call_id}: {e}")
 
@@ -212,8 +270,8 @@ def auto_save_support_call(call_id: str, session: Optional[Dict[str, Any]], dura
 
 @sio.event
 async def connect(sid: str, environ: Dict[str, Any]):
-    logger.info(f"Socket connected: {sid}")
-    await sio.emit("CONNECTED_ACK", {"sid": sid, "timestamp": datetime.utcnow().isoformat()}, room=sid)
+    logger.info(f"Socket.IO client connected: {sid} (Transport: {environ.get('HTTP_UPGRADE', 'polling')})")
+    await sio.emit("CONNECTED_ACK", {"sid": sid, "timestamp": get_current_iso()}, room=sid)
 
 
 @sio.event
@@ -318,7 +376,7 @@ async def REGISTER_CLIENT(sid: str, data: Dict[str, Any]):
                 online_operators[client_id]["status"] = req_status
             elif online_operators[client_id].get("status") == "OFFLINE":
                 online_operators[client_id]["status"] = "AVAILABLE"
-                online_operators[client_id]["availableSince"] = datetime.utcnow().timestamp()
+                online_operators[client_id]["availableSince"] = get_current_time().timestamp()
         else:
             online_operators[client_id] = {
                 "operatorId": client_id,
@@ -326,7 +384,7 @@ async def REGISTER_CLIENT(sid: str, data: Dict[str, Any]):
                 "name": name,
                 "roleName": role_name,
                 "status": req_status or "AVAILABLE",
-                "availableSince": datetime.utcnow().timestamp(),
+                "availableSince": get_current_time().timestamp(),
                 "currentCallId": None
             }
 
@@ -341,7 +399,7 @@ async def REGISTER_CLIENT(sid: str, data: Dict[str, Any]):
             "kioskId": kiosk_id,
             "sid": sid,
             "page": page_name,
-            "lastSeen": datetime.utcnow().timestamp(),
+            "lastSeen": get_current_time().timestamp(),
             "status": "online"
         }
         connected_clients[sid]["kioskId"] = kiosk_id
@@ -359,7 +417,7 @@ async def KIOSK_HEARTBEAT(sid: str, data: Dict[str, Any]):
             "kioskId": kiosk_id,
             "sid": sid,
             "page": page_name,
-            "lastSeen": datetime.utcnow().timestamp(),
+            "lastSeen": get_current_time().timestamp(),
             "status": "online"
         }
         await broadcast_admin_telemetry()
@@ -394,7 +452,7 @@ async def OPERATOR_STATUS_UPDATE(sid: str, data: Dict[str, Any]):
             "name": op_db_info.get("name", raw_op_id),
             "roleName": op_db_info.get("role", "Customer Support Executive"),
             "status": status,
-            "availableSince": datetime.utcnow().timestamp(),
+            "availableSince": get_current_time().timestamp(),
             "currentCallId": None
         }
         target_keys = [resolved_id]
@@ -403,23 +461,26 @@ async def OPERATOR_STATUS_UPDATE(sid: str, data: Dict[str, Any]):
         online_operators[k]["status"] = status
         online_operators[k]["sid"] = sid
         if status == "AVAILABLE":
-            online_operators[k]["availableSince"] = datetime.utcnow().timestamp()
+            online_operators[k]["availableSince"] = get_current_time().timestamp()
 
     # Sync to DB
     try:
         from app.core.database import SessionLocal
         import app.db.models as models
         db = SessionLocal()
-        for k in target_keys:
-            op_row = db.query(models.Operator).filter(
-                (models.Operator.id == k) | (models.Operator.username == k) | (models.Operator.employee_code == k)
-            ).first()
-            if op_row:
-                op_row.status = status.lower()
-        db.commit()
-        db.close()
+        try:
+            for k in target_keys:
+                op_row = db.query(models.Operator).filter(
+                    (models.Operator.id == k) | (models.Operator.username == k) | (models.Operator.employee_code == k)
+                ).first()
+                if op_row:
+                    op_row.status = status.lower()
+            db.commit()
+        finally:
+            db.close()
     except Exception as e:
         logger.error(f"Error syncing operator status: {e}")
+
 
     if status == "AVAILABLE":
         await check_and_dispatch_queued_calls()
@@ -447,7 +508,7 @@ async def CALL_REQUEST(sid: str, data: Dict[str, Any]):
     passenger_name = data.get("passengerName") or ""
     flight_number = data.get("flightNumber") or ""
     pnr = data.get("pnr") or ""
-    ring_start_time = datetime.utcnow().isoformat()
+    ring_start_time = get_current_iso()
 
     call_queue = [c for c in call_queue if c.get("kioskId") != kiosk_id]
 
@@ -526,7 +587,7 @@ async def OPERATOR_ACCEPT_CALL(sid: str, data: Dict[str, Any]):
     call_session["operatorName"] = op_name
     call_session["operatorRole"] = op_role
     call_session["operatorSid"] = sid
-    call_session["startTime"] = datetime.utcnow().isoformat()
+    call_session["startTime"] = get_current_iso()
 
     if operator_id in online_operators:
         online_operators[operator_id]["status"] = "BUSY"
@@ -588,7 +649,7 @@ async def JOIN_CALL_ROOM(sid: str, data: Dict[str, Any]):
                     "operatorSid": sid,
                     "operatorId": data.get("operatorId") or "Operator",
                     "status": "IN_PROGRESS",
-                    "startTime": datetime.utcnow().isoformat()
+                    "startTime": get_current_iso()
                 }
 
         if role == "kiosk" and call_id in active_calls:
@@ -631,7 +692,7 @@ async def OPERATOR_READY(sid: str, data: Dict[str, Any]):
                 "operatorSid": sid,
                 "operatorId": operator_id or "Operator",
                 "status": "IN_PROGRESS",
-                "startTime": datetime.utcnow().isoformat()
+                "startTime": get_current_iso()
             }
 
     op_info = get_operator_info(operator_id) if operator_id else {}
@@ -693,7 +754,7 @@ async def END_CALL(sid: str, data: Dict[str, Any]):
             if start_time_str:
                 try:
                     start_dt = datetime.fromisoformat(start_time_str)
-                    duration_seconds = max(1, int((datetime.utcnow() - start_dt).total_seconds()))
+                    duration_seconds = max(1, int((get_current_time() - start_dt).total_seconds()))
                 except Exception:
                     pass
 
@@ -703,7 +764,7 @@ async def END_CALL(sid: str, data: Dict[str, Any]):
     if op_id and op_id in online_operators:
         if online_operators[op_id].get("status") != "OFFLINE":
             online_operators[op_id]["status"] = "AVAILABLE"
-            online_operators[op_id]["availableSince"] = datetime.utcnow().timestamp()
+            online_operators[op_id]["availableSince"] = get_current_time().timestamp()
             online_operators[op_id]["currentCallId"] = None
             await sio.emit("OPERATOR_STATE_SYNC", online_operators[op_id], room=online_operators[op_id].get("sid", ""))
             await check_and_dispatch_queued_calls()
@@ -750,7 +811,7 @@ async def REMOTE_CONTROL_REQUEST(sid: str, data: Dict[str, Any]):
             "callId": call_id,
             "operatorId": operator_id,
             "operatorName": operator_name,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": get_current_iso()
         }, room=room_name, skip_sid=sid)
 
 
@@ -768,7 +829,7 @@ async def REMOTE_CONTROL_STOP(sid: str, data: Dict[str, Any]):
         await sio.emit("REMOTE_CONTROL_STOPPED", {
             "callId": call_id,
             "stoppedBy": stopped_by,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": get_current_iso()
         }, room=room_name, skip_sid=sid)
 
 

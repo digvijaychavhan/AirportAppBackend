@@ -2,12 +2,12 @@
 Wi-Fi Guest Portal Sessions ORM Models
 """
 
-from datetime import datetime
 from sqlalchemy import Column, String, Boolean, DateTime
 from app.core.database import Base
-from app.db.base import generate_uuid
+from app.db.base import generate_uuid, TimestampMixin
+from app.core.timezone import get_current_time
 
-class WifiSession(Base):
+class WifiSession(Base, TimestampMixin):
     __tablename__ = "wifi_sessions"
 
     id = Column(String, primary_key=True, default=generate_uuid)
@@ -16,4 +16,4 @@ class WifiSession(Base):
     is_verified = Column(Boolean, default=False)
     voucher_code = Column(String, nullable=True)
     expires_at = Column(DateTime, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+
