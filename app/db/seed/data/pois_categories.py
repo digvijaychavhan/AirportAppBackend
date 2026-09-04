@@ -60,7 +60,8 @@ def get_seed_categories():
                 {"id": "medical", "label": "Medical Centre", "icon": "medical_services"},
                 {"id": "baggage", "label": "Left Luggage & Wrap", "icon": "luggage"},
                 {"id": "telecom", "label": "SIM & Telecom", "icon": "sim_card"},
-                {"id": "transport", "label": "Taxi & Car Rental", "icon": "local_taxi"}
+                {"id": "transport", "label": "Taxi & Car Rental", "icon": "local_taxi"},
+                {"id": "lostfound", "label": "Lost & Found", "icon": "find_in_page"}
             ])
         },
         {
@@ -116,6 +117,8 @@ def get_seed_categories():
                 {"id": "babycare", "label": "Baby Care & Nursery", "icon": "child_care"},
                 {"id": "smoking", "label": "Smoking Lounge", "icon": "smoking_rooms"},
                 {"id": "charging", "label": "Charging Station", "icon": "power"},
+                {"id": "accessible", "label": "Accessibility", "icon": "accessible"},
+                {"id": "wifi", "label": "Free Wi-Fi", "icon": "wifi"},
                 {"id": "trolley", "label": "Luggage Trolleys", "icon": "shopping_cart"}
             ])
         },
@@ -249,6 +252,34 @@ def get_seed_pois():
             "operating_hours": "24 Hours", "terminal": "Terminal 3", "floor_name": "Arrivals Hall", "gate": "Exit Gate 6",
             "distance_m": 160, "image_url": "/services/sim-counter.png", "x_coord": 510.0, "y_coord": 390.0
         },
+        {
+            "id": "poi_srv5", "name": "Emergency Medical Centre & First Aid", "category": "services", "sub_category": "medical",
+            "description": "24/7 certified emergency medical trauma care, first aid and pharmacy services.",
+            "operating_hours": "24 Hours", "terminal": "Terminal 3", "floor_name": "Level 2", "gate": "Near Security Hold Area",
+            "distance_m": 140, "badge_label": "24/7", "badge_variant": "red",
+            "image_url": "/services/medical.png", "x_coord": 540.0, "y_coord": 370.0
+        },
+        {
+            "id": "poi_srv6", "name": "Prepaid Taxi & Ground Transportation", "category": "services", "sub_category": "transport",
+            "description": "Authorized prepaid taxi counters, app-based ride pick-up points and inter-terminal bus booking.",
+            "operating_hours": "24 Hours", "terminal": "Terminal 3", "floor_name": "Level 1", "gate": "Arrival Forecourt Lane 2",
+            "distance_m": 250, "badge_label": "Transport", "badge_variant": "purple",
+            "image_url": "/services/transport.png", "x_coord": 470.0, "y_coord": 420.0
+        },
+        {
+            "id": "poi_srv7", "name": "Airport Lost & Found Property Office", "category": "services", "sub_category": "lostfound",
+            "description": "Reporting and retrieval center for items misplaced across airport terminals and security zones.",
+            "operating_hours": "07:00 AM – 11:00 PM", "terminal": "Terminal 3", "floor_name": "Level 1", "gate": "Arrivals Wing B",
+            "distance_m": 190, "badge_label": "Help", "badge_variant": "teal",
+            "image_url": "/services/lost-found.png", "x_coord": 490.0, "y_coord": 410.0
+        },
+        {
+            "id": "poi_srv8", "name": "Wheelchair & Special Assistance Counter", "category": "services", "sub_category": "assistance",
+            "description": "Dedicated assistance for PRM passengers, buggy transfers and priority boarding escort.",
+            "operating_hours": "24 Hours", "terminal": "Terminal 3", "floor_name": "Level 2", "gate": "Check-in Row A",
+            "distance_m": 70, "badge_label": "Free", "badge_variant": "teal",
+            "image_url": "/services/wheelchair.png", "x_coord": 520.0, "y_coord": 340.0
+        },
 
         # --- Amenities ---
         {
@@ -269,7 +300,8 @@ def get_seed_pois():
             "id": "poi_am3", "name": "Multi-Faith Prayer Room", "category": "amenities", "sub_category": "prayer",
             "description": "Quiet prayer and meditation space with ablution facilities for all travelers.",
             "operating_hours": "24 Hours", "terminal": "Terminal 3", "floor_name": "Level 2", "gate": "Near Gate 34",
-            "distance_m": 220, "image_url": "/amenities/prayer-room.png", "x_coord": 570.0, "y_coord": 250.0
+            "distance_m": 220, "badge_label": "Free", "badge_variant": "teal",
+            "image_url": "/amenities/prayer-room.png", "x_coord": 570.0, "y_coord": 250.0
         },
         {
             "id": "poi_am4", "name": "Baby Care & Nursing Room", "category": "amenities", "sub_category": "babycare",
@@ -284,6 +316,34 @@ def get_seed_pois():
             "operating_hours": "24 Hours", "terminal": "Terminal 3", "floor_name": "Level 1", "gate": "Gate 15 Waiting Area",
             "distance_m": 75, "badge_label": "Free", "badge_variant": "teal",
             "image_url": "/amenities/charging-station.png", "x_coord": 580.0, "y_coord": 360.0
+        },
+        {
+            "id": "poi_am6", "name": "Designated Smoking Lounge", "category": "amenities", "sub_category": "smoking",
+            "description": "Enclosed, air-filtered smoking lounge with electronic lighters and ventilation.",
+            "operating_hours": "24 Hours", "terminal": "Terminal 3", "floor_name": "Level 2", "gate": "Near Gate 36 Airside",
+            "distance_m": 240, "badge_label": "18+", "badge_variant": "amber",
+            "image_url": "/amenities/smoking-lounge.png", "x_coord": 610.0, "y_coord": 280.0
+        },
+        {
+            "id": "poi_am7", "name": "PRM Wheelchair Accessible Facility", "category": "amenities", "sub_category": "accessible",
+            "description": "Tactile pathways, dedicated braille signage, wheelchair lifts and lowered service counters.",
+            "operating_hours": "24 Hours", "terminal": "Terminal 3", "floor_name": "Level 1", "gate": "Arrivals & Departures Pier",
+            "distance_m": 80, "badge_label": "Free", "badge_variant": "teal",
+            "image_url": "/amenities/accessible.png", "x_coord": 530.0, "y_coord": 350.0
+        },
+        {
+            "id": "poi_am8", "name": "Complimentary High-Speed Wi-Fi Zone", "category": "amenities", "sub_category": "wifi",
+            "description": "Free 45-minute high-speed 5G Wi-Fi with instant OTP and passport scanner verification.",
+            "operating_hours": "24 Hours", "terminal": "Terminal 3", "floor_name": "All Floors", "gate": "Airport-wide coverage",
+            "distance_m": 10, "badge_label": "Free", "badge_variant": "teal",
+            "image_url": "/amenities/wifi.png", "x_coord": 500.0, "y_coord": 300.0
+        },
+        {
+            "id": "poi_am9", "name": "Luggage Trolley Staging Hub", "category": "amenities", "sub_category": "trolley",
+            "description": "Free luggage trolleys available at baggage claim, entry forecourts and transit corridors.",
+            "operating_hours": "24 Hours", "terminal": "Terminal 3", "floor_name": "Level 1", "gate": "Arrival Forecourt & Baggage Hall",
+            "distance_m": 30, "badge_label": "Free", "badge_variant": "teal",
+            "image_url": "/amenities/trolley.png", "x_coord": 490.0, "y_coord": 330.0
         },
 
         # --- Boarding Gates ---

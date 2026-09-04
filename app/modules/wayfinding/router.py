@@ -153,27 +153,13 @@ async def get_directory_pois(
     db: Session = Depends(get_db)
 ):
     """
-    Fetches active categorized directory points of interest from SQL database with category alias matching.
+    Fetches active categorized directory points of interest directly from SQL database.
     """
     try:
         query = db.query(models.Poi).filter(models.Poi.is_active == True)
         if category and category.strip():
             raw_cat = category.strip().lower()
-            # Category alias resolution
-            alias_map = {
-                "eat-dine": ["eat-dine", "dining", "food", "restaurant"],
-                "dining": ["eat-dine", "dining", "food", "restaurant"],
-                "shopping": ["shopping", "retail", "shop"],
-                "retail": ["shopping", "retail", "shop"],
-                "lounges": ["lounges", "lounge"],
-                "lounge": ["lounges", "lounge"],
-                "services": ["services", "service"],
-                "amenities": ["amenities", "amenity", "facility"],
-                "gates": ["gates", "gate"]
-            }
-            match_cats = alias_map.get(raw_cat, [raw_cat])
-            from sqlalchemy import or_
-            query = query.filter(or_(*[models.Poi.category.ilike(f"%{c}%") for c in match_cats]))
+            query = query.filter(models.Poi.category.ilike(raw_cat))
 
         pois = query.order_by(models.Poi.name).all()
 
