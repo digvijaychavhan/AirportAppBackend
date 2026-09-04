@@ -10,6 +10,7 @@ from app.modules.wifi import wifi_router
 from app.modules.ai import ai_router
 from app.modules.feedback import feedback_router
 from app.modules.kiosk import kiosk_router
+from app.modules.hardware import hardware_router
 
 all_routers = [
     flights_router,
@@ -19,7 +20,8 @@ all_routers = [
     wifi_router,
     ai_router,
     feedback_router,
-    kiosk_router
+    kiosk_router,
+    hardware_router
 ]
 
 __all__ = [
@@ -31,5 +33,6 @@ __all__ = [
     "ai_router",
     "feedback_router",
     "kiosk_router",
+    "hardware_router",
     "all_routers"
 ]

@@ -129,6 +129,17 @@ def run_migrations():
             except Exception as e:
                 logger.warning(f"Notice on screen_annotations migration: {e}")
 
+            # Devices column migrations
+            try:
+                dev_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(devices);")).fetchall()]
+                if dev_cols:
+                    if "runtime_env" not in dev_cols:
+                        conn.execute(text("ALTER TABLE devices ADD COLUMN runtime_env VARCHAR DEFAULT 'browser';"))
+                        logger.info("Database migration: added runtime_env to devices")
+                    conn.commit()
+            except Exception as e:
+                logger.warning(f"Notice on devices migration: {e}")
+
         logger.info("Database schema migration verification completed.")
 
     except Exception as e:

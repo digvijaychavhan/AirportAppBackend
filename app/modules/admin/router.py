@@ -22,7 +22,7 @@ from app.core.logging import logger
 from app.core.security import verify_password, hash_password, generate_secure_token
 from app.core.timezone import get_current_time, get_current_iso, time_diff_seconds
 import app.db.models as models
-from app.modules.support.service import online_operators, connected_clients, online_kiosks, sio
+from app.modules.support.service import online_operators, connected_clients, online_kiosks, active_kiosk_claims, sio
 from app.modules.admin.schemas import (
     OperatorLoginPayload,
     OperatorCreatePayload,
@@ -48,11 +48,7 @@ router = APIRouter(tags=["Admin & Telemetry"])
 async def get_admin_overview(db: Session = Depends(get_db)):
     try:
         total_kiosks = db.query(models.Device).filter(models.Device.device_type == "kiosk").count()
-        if total_kiosks == 0:
-            total_kiosks = 5
-
         active_kiosks_count = len([k for k in online_kiosks.values() if k.get("sid") in connected_clients or k.get("sid")])
-        total_devices = db.query(models.Device).count()
         total_operators = db.query(models.Operator).count()
 
         available_count = 0
@@ -96,8 +92,8 @@ async def get_admin_overview(db: Session = Depends(get_db)):
                     "successRate": scan_success_rate
                 },
                 "devices": {
-                    "total": total_devices,
-                    "online": active_kiosks_count + 2
+                    "total": total_kiosks,
+                    "online": active_kiosks_count
                 },
                 "amenities": {
                     "total": total_amenities
@@ -145,39 +141,46 @@ async def get_network_health():
 @router.get("/api/v1/admin/devices")
 async def get_devices(db: Session = Depends(get_db)):
     try:
-        devices = db.query(models.Device).order_by(models.Device.device_id).all()
-        active_kiosks_count = len([k for k in online_kiosks.values() if k.get("sid") in connected_clients or k.get("sid")])
+        devices = db.query(models.Device).filter(models.Device.device_type == "kiosk").order_by(models.Device.device_id).all()
         now = get_current_time()
+
+        active_kiosk_ids = set(online_kiosks.keys())
+        for k in online_kiosks.values():
+            if k.get("kioskId"):
+                active_kiosk_ids.add(k["kioskId"])
 
         data = []
         for d in devices:
-            # Determine if active recently (< 2 mins)
+            is_active_socket = (d.device_id in active_kiosk_ids) or (d.id in active_kiosk_ids)
             is_recent = d.last_heartbeat and time_diff_seconds(now, d.last_heartbeat) < 120
-            is_online = is_recent or (d.device_id in online_kiosks) or (active_kiosks_count > 0 and d.device_id == "KIOSK-T3-L1-04")
+            is_online = is_active_socket or is_recent
+            in_memory_kiosk = online_kiosks.get(d.device_id) or online_kiosks.get(d.id) or {}
+            detected_env = in_memory_kiosk.get("runtimeEnv") or getattr(d, 'runtime_env', None) or ('electron' if d.cpu_pct is not None else 'browser')
 
             data.append({
                 "id": d.id,
                 "deviceId": d.device_id,
                 "name": d.name,
-                "deviceType": d.device_type,
+                "deviceType": d.device_type or "kiosk",
                 "ipAddress": d.ip_address,
                 "macAddress": d.mac_address,
-                "terminal": d.terminal,
-                "floorName": d.floor_name,
-                "location": d.location,
-                "status": "online" if is_online else (d.status or "offline"),
-                "pingMs": d.ping_ms or 12,
-                "cpuPct": round(d.cpu_pct or 18.0, 1),
-                "ramUsedMb": round(d.ram_used_mb or 2048.0, 1),
-                "ramTotalMb": round(d.ram_total_mb or 8192.0, 1),
-                "ramPct": round(d.ram_pct or 25.0, 1),
-                "networkBandwidthMbps": round(d.network_bandwidth_mbps or 100.0, 1),
-                "scannerConnected": bool(d.scanner_connected),
-                "scannerWorking": d.scanner_working or d.scanner_status or "OK",
-                "scannerStatus": d.scanner_status or "OK",
-                "cameraConnected": bool(d.camera_connected),
-                "cameraWorking": d.camera_working or d.camera_status or "OK",
-                "cameraStatus": d.camera_status or "OK",
+                "terminal": d.terminal or "Terminal 3",
+                "floorName": d.floor_name or "Level 1",
+                "location": d.location or "",
+                "status": "online" if is_online else "offline",
+                "runtimeEnv": detected_env,
+                "pingMs": d.ping_ms if d.ping_ms is not None else 12,
+                "cpuPct": round(d.cpu_pct, 1) if d.cpu_pct is not None else None,
+                "ramUsedMb": round(d.ram_used_mb, 1) if d.ram_used_mb is not None else None,
+                "ramTotalMb": round(d.ram_total_mb, 1) if d.ram_total_mb is not None else None,
+                "ramPct": round(d.ram_pct, 1) if d.ram_pct is not None else None,
+                "networkBandwidthMbps": round(d.network_bandwidth_mbps, 1) if d.network_bandwidth_mbps is not None else None,
+                "scannerConnected": d.scanner_connected,
+                "scannerWorking": d.scanner_working or d.scanner_status or "N/A",
+                "scannerStatus": d.scanner_status or d.scanner_working or "N/A",
+                "cameraConnected": d.camera_connected,
+                "cameraWorking": d.camera_working or d.camera_status or "N/A",
+                "cameraStatus": d.camera_status or d.camera_working or "N/A",
                 "screenStatus": d.screen_status or "OK",
                 "lastHeartbeat": d.last_heartbeat.isoformat() if d.last_heartbeat else None,
                 "createdAt": d.created_at.isoformat() if d.created_at else None
@@ -220,6 +223,7 @@ async def record_telemetry_heartbeat(
             db.add(dev)
 
         # Update telemetry statistics
+        dev.runtime_env = payload.runtime_env or ("electron" if payload.cpu_pct is not None else "browser")
         dev.scanner_connected = payload.scanner_connected
         dev.scanner_working = payload.scanner_working
         dev.scanner_status = payload.scanner_working
@@ -239,10 +243,19 @@ async def record_telemetry_heartbeat(
         dev.last_heartbeat = now
         db.commit()
 
+        if payload.client_session_id:
+            active_kiosk_claims[dev.device_id] = {
+                "sessionId": payload.client_session_id,
+                "runtimeEnv": dev.runtime_env,
+                "lastSeen": now.timestamp(),
+                "kioskId": dev.device_id
+            }
+
         # Emit live telemetry broadcast via Socket.IO
         device_data = {
             "deviceId": dev.device_id,
             "status": "online",
+            "runtimeEnv": dev.runtime_env,
             "cpuPct": dev.cpu_pct,
             "ramPct": dev.ram_pct,
             "ramUsedMb": dev.ram_used_mb,
@@ -259,8 +272,10 @@ async def record_telemetry_heartbeat(
             import asyncio
             if asyncio.iscoroutinefunction(sio.emit):
                 asyncio.create_task(sio.emit("ADMIN_TELEMETRY_UPDATED", device_data))
+                asyncio.create_task(sio.emit("KIOSKS_UPDATED", device_data))
             else:
                 sio.emit("ADMIN_TELEMETRY_UPDATED", device_data)
+                sio.emit("KIOSKS_UPDATED", device_data)
         except Exception as ws_err:
             logger.debug(f"Socket.IO emit warning: {ws_err}")
 
@@ -277,37 +292,79 @@ async def create_or_update_device(
     db: Session = Depends(get_db)
 ):
     try:
-        device_id = payload.device_id or f"DEV-{get_current_time().strftime('%M%S')}"
+        import re
+        device_id = payload.device_id
+        if not device_id:
+            raw_slug = re.sub(r'[^A-Za-z0-9]', '-', payload.name or "KIOSK").upper().strip('-')
+            if not raw_slug.startswith("KIOSK"):
+                raw_slug = f"KIOSK-{raw_slug}"
+            base_id = raw_slug[:24]
+            device_id = base_id
+            suffix = 1
+            while db.query(models.Device).filter(models.Device.device_id == device_id).first():
+                device_id = f"{base_id}-{suffix}"
+                suffix += 1
+
         existing = db.query(models.Device).filter(
             (models.Device.id == payload.id) | (models.Device.device_id == device_id)
         ).first()
 
         if existing:
             existing.name = payload.name
-            existing.device_type = payload.device_type or existing.device_type
-            existing.ip_address = payload.ip_address or existing.ip_address
-            existing.mac_address = payload.mac_address or existing.mac_address
-            existing.terminal = payload.terminal or existing.terminal
-            existing.floor_name = payload.floor_name or existing.floor_name
-            existing.location = payload.location or existing.location
-            existing.status = payload.status or existing.status
+            existing.device_type = "kiosk"
+            if payload.ip_address:
+                existing.ip_address = payload.ip_address
+            if payload.mac_address:
+                existing.mac_address = payload.mac_address
+            if payload.terminal:
+                existing.terminal = payload.terminal
+            if payload.floor_name:
+                existing.floor_name = payload.floor_name
+            if payload.location is not None:
+                existing.location = payload.location
+            if payload.status:
+                existing.status = payload.status
             db.commit()
-            return {"success": True, "message": "Device updated successfully"}
+
+            try:
+                import asyncio
+                if asyncio.iscoroutinefunction(sio.emit):
+                    asyncio.create_task(sio.emit("ADMIN_TELEMETRY_UPDATED", {"deviceId": existing.device_id}))
+                    asyncio.create_task(sio.emit("KIOSKS_UPDATED", {"deviceId": existing.device_id}))
+                else:
+                    sio.emit("ADMIN_TELEMETRY_UPDATED", {"deviceId": existing.device_id})
+                    sio.emit("KIOSKS_UPDATED", {"deviceId": existing.device_id})
+            except Exception as ws_err:
+                logger.debug(f"Socket.IO emit warning: {ws_err}")
+
+            return {"success": True, "message": "Device updated successfully", "deviceId": existing.device_id}
         else:
             new_dev = models.Device(
                 device_id=device_id,
                 name=payload.name,
-                device_type=payload.device_type or "kiosk",
+                device_type="kiosk",
                 ip_address=payload.ip_address or "192.168.1.100",
                 mac_address=payload.mac_address or "00:1A:2B:3C:4D:00",
                 terminal=payload.terminal or "Terminal 3",
                 floor_name=payload.floor_name or "Level 1",
-                location=payload.location or "Central Concourse",
-                status=payload.status or "online"
+                location=payload.location or "",
+                status=payload.status or "offline"
             )
             db.add(new_dev)
             db.commit()
-            return {"success": True, "message": "Device registered successfully"}
+
+            try:
+                import asyncio
+                if asyncio.iscoroutinefunction(sio.emit):
+                    asyncio.create_task(sio.emit("ADMIN_TELEMETRY_UPDATED", {"deviceId": new_dev.device_id}))
+                    asyncio.create_task(sio.emit("KIOSKS_UPDATED", {"deviceId": new_dev.device_id}))
+                else:
+                    sio.emit("ADMIN_TELEMETRY_UPDATED", {"deviceId": new_dev.device_id})
+                    sio.emit("KIOSKS_UPDATED", {"deviceId": new_dev.device_id})
+            except Exception as ws_err:
+                logger.debug(f"Socket.IO emit warning: {ws_err}")
+
+            return {"success": True, "message": "Device registered successfully", "deviceId": new_dev.device_id}
     except Exception as e:
         db.rollback()
         logger.error(f"Error saving device: {e}")
@@ -356,9 +413,28 @@ async def delete_device(device_id: str, db: Session = Depends(get_db)):
         dev = db.query(models.Device).filter((models.Device.id == device_id) | (models.Device.device_id == device_id)).first()
         if not dev:
             raise HTTPException(status_code=404, detail="Device not found")
+        
+        target_device_id = dev.device_id
+        online_kiosks.pop(target_device_id, None)
+        for kid, kdata in list(online_kiosks.items()):
+            if kid == target_device_id or kdata.get("kioskId") == target_device_id:
+                online_kiosks.pop(kid, None)
+
         db.delete(dev)
         db.commit()
-        return {"success": True, "message": "Device deleted successfully"}
+
+        try:
+            import asyncio
+            if asyncio.iscoroutinefunction(sio.emit):
+                asyncio.create_task(sio.emit("ADMIN_TELEMETRY_UPDATED", {"deletedDeviceId": target_device_id}))
+                asyncio.create_task(sio.emit("KIOSKS_UPDATED", {"deletedDeviceId": target_device_id}))
+            else:
+                sio.emit("ADMIN_TELEMETRY_UPDATED", {"deletedDeviceId": target_device_id})
+                sio.emit("KIOSKS_UPDATED", {"deletedDeviceId": target_device_id})
+        except Exception as ws_err:
+            logger.debug(f"Socket.IO emit warning on delete: {ws_err}")
+
+        return {"success": True, "message": "Device deleted successfully", "deviceId": target_device_id}
     except HTTPException:
         raise
     except Exception as e:

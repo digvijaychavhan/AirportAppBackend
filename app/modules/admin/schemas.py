@@ -46,8 +46,8 @@ class DevicePayload(BaseAdminSchema):
     mac_address: Optional[str] = Field("00:1A:2B:3C:4D:00", alias="macAddress")
     terminal: Optional[str] = "Terminal 3"
     floor_name: Optional[str] = Field("Level 1", alias="floorName")
-    location: Optional[str] = "Central Concourse"
-    status: Optional[str] = "online"
+    location: Optional[str] = None
+    status: Optional[str] = "offline"
 
 
 class ScanLogCreatePayload(BaseAdminSchema):
@@ -82,17 +82,19 @@ class BatchUserActionsPayload(BaseAdminSchema):
 
 class KioskTelemetryHeartbeatPayload(BaseAdminSchema):
     kiosk_id: str = Field("T3-L1-K04", alias="kioskId")
-    scanner_connected: bool = Field(True, alias="scannerConnected")
-    scanner_working: str = Field("OK", alias="scannerWorking")  # OK, ERROR, DISCONNECTED
-    camera_connected: bool = Field(True, alias="cameraConnected")
-    camera_working: str = Field("OK", alias="cameraWorking")  # OK, ERROR, DISCONNECTED
-    network_bandwidth_mbps: float = Field(100.0, alias="networkBandwidthMbps")
-    cpu_pct: float = Field(18.0, ge=0.0, le=100.0, alias="cpuPct")
-    ram_used_mb: float = Field(2048.0, ge=0.0, alias="ramUsedMb")
-    ram_total_mb: float = Field(8192.0, ge=0.0, alias="ramTotalMb")
-    ram_pct: float = Field(25.0, ge=0.0, le=100.0, alias="ramPct")
-    ping_ms: Optional[int] = Field(12, ge=0, alias="pingMs")
+    runtime_env: Optional[str] = Field("browser", alias="runtimeEnv")  # electron | browser
+    scanner_connected: Optional[bool] = Field(None, alias="scannerConnected")
+    scanner_working: Optional[str] = Field(None, alias="scannerWorking")  # OK, ERROR, DISCONNECTED, N/A
+    camera_connected: Optional[bool] = Field(None, alias="cameraConnected")
+    camera_working: Optional[str] = Field(None, alias="cameraWorking")  # OK, ERROR, DISCONNECTED, N/A
+    network_bandwidth_mbps: Optional[float] = Field(None, alias="networkBandwidthMbps")
+    cpu_pct: Optional[float] = Field(None, ge=0.0, le=100.0, alias="cpuPct")
+    ram_used_mb: Optional[float] = Field(None, ge=0.0, alias="ramUsedMb")
+    ram_total_mb: Optional[float] = Field(None, ge=0.0, alias="ramTotalMb")
+    ram_pct: Optional[float] = Field(None, ge=0.0, le=100.0, alias="ramPct")
+    ping_ms: Optional[int] = Field(None, ge=0, alias="pingMs")
     ip_address: Optional[str] = Field(None, alias="ipAddress")
+    client_session_id: Optional[str] = Field(None, alias="clientSessionId")
     status: Optional[str] = "online"
 
 

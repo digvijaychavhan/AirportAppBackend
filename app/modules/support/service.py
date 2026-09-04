@@ -30,6 +30,7 @@ connected_clients: Dict[str, Dict[str, Any]] = {}
 call_queue: List[Dict[str, Any]] = []
 online_operators: Dict[str, Dict[str, Any]] = {}
 online_kiosks: Dict[str, Dict[str, Any]] = {}
+active_kiosk_claims: Dict[str, Dict[str, Any]] = {}
 
 
 async def cleanup_ghost_connections(timeout_seconds: int = 120) -> Dict[str, int]:
@@ -190,6 +191,7 @@ async def broadcast_admin_telemetry():
             "activeKiosks": active_kiosks_count
         }
         await sio.emit("ADMIN_TELEMETRY_UPDATE", payload)
+        await sio.emit("ADMIN_TELEMETRY_UPDATED", payload)
         await sio.emit("OPERATORS_UPDATED", payload)
         await sio.emit("KIOSKS_UPDATED", payload)
     except Exception as e:
@@ -295,6 +297,7 @@ async def disconnect(sid: str):
             for kid, kdata in list(online_kiosks.items()):
                 if kdata.get("sid") == sid:
                     online_kiosks.pop(kid, None)
+                    active_kiosk_claims.pop(kid, None)
             await broadcast_admin_telemetry()
 
         # Only cancel from queue if call is still waiting in QUEUED state (passenger disconnected before answer)
@@ -395,14 +398,45 @@ async def REGISTER_CLIENT(sid: str, data: Dict[str, Any]):
     if role == "kiosk":
         kiosk_id = client_id or f"KIOSK-{sid[:6]}"
         page_name = data.get("page", "/")
+        runtime_env = data.get("runtimeEnv") or "browser"
+        session_id = data.get("clientSessionId")
         online_kiosks[kiosk_id] = {
             "kioskId": kiosk_id,
             "sid": sid,
+            "sessionId": session_id,
             "page": page_name,
+            "runtimeEnv": runtime_env,
             "lastSeen": get_current_time().timestamp(),
             "status": "online"
         }
+        active_kiosk_claims[kiosk_id] = {
+            "sessionId": session_id,
+            "runtimeEnv": runtime_env,
+            "lastSeen": get_current_time().timestamp(),
+            "kioskId": kiosk_id,
+            "sid": sid
+        }
         connected_clients[sid]["kioskId"] = kiosk_id
+
+        # Persist runtime_env to database
+        try:
+            from app.core.database import SessionLocal
+            import app.db.models as models
+            db = SessionLocal()
+            try:
+                dev = db.query(models.Device).filter(
+                    (models.Device.device_id == kiosk_id) | (models.Device.id == kiosk_id)
+                ).first()
+                if dev:
+                    dev.status = "online"
+                    dev.runtime_env = runtime_env
+                    dev.last_heartbeat = get_current_time()
+                    db.commit()
+            finally:
+                db.close()
+        except Exception as e:
+            logger.error(f"Error updating device status on REGISTER_CLIENT: {e}")
+
         await broadcast_admin_telemetry()
 
     await sio.emit("REGISTERED_ACK", {"status": "REGISTERED", "role": role, "clientId": client_id}, room=sid)
@@ -412,23 +446,75 @@ async def REGISTER_CLIENT(sid: str, data: Dict[str, Any]):
 async def KIOSK_HEARTBEAT(sid: str, data: Dict[str, Any]):
     kiosk_id = data.get("clientId") or data.get("kioskId")
     page_name = data.get("page", "/")
+    session_id = data.get("clientSessionId")
     if kiosk_id:
         online_kiosks[kiosk_id] = {
             "kioskId": kiosk_id,
             "sid": sid,
+            "sessionId": session_id,
             "page": page_name,
             "lastSeen": get_current_time().timestamp(),
             "status": "online"
         }
+        if kiosk_id in active_kiosk_claims:
+            active_kiosk_claims[kiosk_id]["lastSeen"] = get_current_time().timestamp()
+            if session_id:
+                active_kiosk_claims[kiosk_id]["sessionId"] = session_id
+        # Update DB device telemetry if present
+        try:
+            from app.core.database import SessionLocal
+            import app.db.models as models
+            db = SessionLocal()
+            try:
+                dev = db.query(models.Device).filter(
+                    (models.Device.device_id == kiosk_id) | (models.Device.id == kiosk_id)
+                ).first()
+                if dev:
+                    dev.runtime_env = data.get("runtimeEnv") or ("electron" if data.get("cpuPct") is not None else "browser")
+                    if "cpuPct" in data:
+                        dev.cpu_pct = data.get("cpuPct")
+                    if "ramUsedMb" in data:
+                        dev.ram_used_mb = data.get("ramUsedMb")
+                    if "ramTotalMb" in data:
+                        dev.ram_total_mb = data.get("ramTotalMb")
+                    if "ramPct" in data:
+                        dev.ram_pct = data.get("ramPct")
+                    if "networkBandwidthMbps" in data:
+                        dev.network_bandwidth_mbps = data.get("networkBandwidthMbps")
+                    if "scannerConnected" in data:
+                        dev.scanner_connected = data.get("scannerConnected")
+                    if "scannerWorking" in data:
+                        dev.scanner_working = data.get("scannerWorking")
+                        dev.scanner_status = data.get("scannerWorking")
+                    if "cameraConnected" in data:
+                        dev.camera_connected = data.get("cameraConnected")
+                    if "cameraWorking" in data:
+                        dev.camera_working = data.get("cameraWorking")
+                        dev.camera_status = data.get("cameraWorking")
+                    if "pingMs" in data and data.get("pingMs") is not None:
+                        dev.ping_ms = data.get("pingMs")
+                    dev.status = "online"
+                    dev.last_heartbeat = get_current_time()
+                    db.commit()
+            finally:
+                db.close()
+        except Exception as e:
+            logger.error(f"Error saving KIOSK_HEARTBEAT to db: {e}")
+
         await broadcast_admin_telemetry()
 
 
 @sio.event
 async def UNREGISTER_KIOSK(sid: str, data: Dict[str, Any]):
     kiosk_id = data.get("clientId") or data.get("kioskId")
+    session_id = data.get("clientSessionId")
     for kid, kdata in list(online_kiosks.items()):
         if kid == kiosk_id or kdata.get("sid") == sid:
             online_kiosks.pop(kid, None)
+    if kiosk_id:
+        curr = active_kiosk_claims.get(kiosk_id)
+        if not session_id or (curr and curr.get("sessionId") == session_id):
+            active_kiosk_claims.pop(kiosk_id, None)
     await broadcast_admin_telemetry()
 
 

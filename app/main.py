@@ -15,8 +15,10 @@ from app.core.config import settings
 from app.core.logging import setup_logging, logger
 from app.db.migrations import run_migrations
 from app.db.seed.seeder import seed_database
+import asyncio
 from app.modules import all_routers
 from app.modules.support.service import sio, get_recordings_dir
+from app.modules.hardware.service import start_hardware_monitoring, stop_hardware_monitoring
 
 setup_logging()
 
@@ -24,7 +26,7 @@ setup_logging()
 async def lifespan(app: FastAPI):
     """
     Application startup & shutdown events.
-    Executes idempotent migrations and initial seed population.
+    Executes idempotent migrations, initial seed population, and hardware monitors.
     """
     logger.info(f"Starting {settings.PROJECT_NAME} v{settings.VERSION} [{settings.ENVIRONMENT}]")
     try:
@@ -36,7 +38,17 @@ async def lifespan(app: FastAPI):
         logger.info("Pathfinding graphs pre-warmed successfully")
     except Exception as e:
         logger.error(f"Startup database initialization warning: {e}")
+
+    # Start physical barcode scanner & hardware monitoring
+    try:
+        loop = asyncio.get_running_loop()
+        start_hardware_monitoring(loop)
+    except Exception as e:
+        logger.warning(f"Hardware monitoring startup warning: {e}")
+
     yield
+
+    stop_hardware_monitoring()
     logger.info(f"Shutting down {settings.PROJECT_NAME}")
 
 def create_app() -> FastAPI:

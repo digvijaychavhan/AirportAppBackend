@@ -19,25 +19,26 @@ class Device(Base, TimestampMixin):
     terminal = Column(String, default="Terminal 3")
     floor_name = Column(String, default="Level 1")
     location = Column(String, default="Near Gate B12")
-    status = Column(String, default="online")  # online, warning, offline
+    status = Column(String, default="offline")  # online, warning, offline
+    runtime_env = Column(String, default="browser", nullable=True)  # electron, browser
     
     # Hardware Diagnostics
-    scanner_connected = Column(Boolean, default=True)
-    scanner_working = Column(String, default="OK")  # OK, ERROR, DISCONNECTED
-    scanner_status = Column(String, default="OK")
+    scanner_connected = Column(Boolean, nullable=True)
+    scanner_working = Column(String, nullable=True)  # OK, ERROR, DISCONNECTED, N/A
+    scanner_status = Column(String, nullable=True)
     
-    camera_connected = Column(Boolean, default=True)
-    camera_working = Column(String, default="OK")  # OK, ERROR, DISCONNECTED
-    camera_status = Column(String, default="OK")
+    camera_connected = Column(Boolean, nullable=True)
+    camera_working = Column(String, nullable=True)  # OK, ERROR, DISCONNECTED, N/A
+    camera_status = Column(String, nullable=True)
     
     screen_status = Column(String, default="OK")
     
-    # System Resources & Network
-    cpu_pct = Column(Float, default=18.0)
-    ram_used_mb = Column(Float, default=2048.0)
-    ram_total_mb = Column(Float, default=8192.0)
-    ram_pct = Column(Float, default=25.0)
-    network_bandwidth_mbps = Column(Float, default=100.0)
+    # System Resources & Network (Real stats from Electron, null in Browser mode)
+    cpu_pct = Column(Float, nullable=True)
+    ram_used_mb = Column(Float, nullable=True)
+    ram_total_mb = Column(Float, nullable=True)
+    ram_pct = Column(Float, nullable=True)
+    network_bandwidth_mbps = Column(Float, nullable=True)
     ping_ms = Column(Integer, default=12)
     
     last_heartbeat = Column(DateTime, default=get_current_time)
