@@ -19,7 +19,9 @@ from app.db.seed.data import (
     get_seed_devices,
     get_seed_operators,
     get_seed_scan_logs,
-    get_seed_user_action_logs
+    get_seed_user_action_logs,
+    get_seed_support_calls,
+    get_seed_feedback_submissions
 )
 
 def seed_database(force: bool = False, session=None, custom_engine=None):
@@ -223,6 +225,18 @@ def seed_database(force: bool = False, session=None, custom_engine=None):
         if db.query(models.UserActionLog).count() == 0:
             actions = [models.UserActionLog(**act) for act in get_seed_user_action_logs()]
             db.add_all(actions)
+            db.commit()
+
+        # 16. Support Calls (Initial seed if empty)
+        if db.query(models.SupportCall).count() == 0:
+            calls = [models.SupportCall(**sc) for sc in get_seed_support_calls()]
+            db.add_all(calls)
+            db.commit()
+
+        # 17. Feedback Submissions (Initial seed if empty)
+        if db.query(models.FeedbackSubmission).count() == 0:
+            feedbacks = [models.FeedbackSubmission(**fb) for fb in get_seed_feedback_submissions()]
+            db.add_all(feedbacks)
             db.commit()
 
         logger.info("Database seeding / upsert synchronization completed successfully.")

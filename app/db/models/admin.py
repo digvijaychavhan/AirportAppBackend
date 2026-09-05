@@ -39,9 +39,9 @@ class Device(Base, TimestampMixin):
     ram_total_mb = Column(Float, nullable=True)
     ram_pct = Column(Float, nullable=True)
     network_bandwidth_mbps = Column(Float, nullable=True)
-    ping_ms = Column(Integer, default=12)
+    ping_ms = Column(Integer, nullable=True, default=None)
     
-    last_heartbeat = Column(DateTime, default=get_current_time)
+    last_heartbeat = Column(DateTime, nullable=True, default=None)
 
 
 class ScanLog(Base, TimestampMixin):
