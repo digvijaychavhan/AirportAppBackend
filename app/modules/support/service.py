@@ -633,6 +633,17 @@ async def CALL_REQUEST(sid: str, data: Dict[str, Any]):
         await dispatch_call_to_operator(call_data, idle_op)
 
 
+@sio.on("REQUEST_CALL")
+async def REQUEST_CALL(sid: str, data: Dict[str, Any]):
+    await CALL_REQUEST(sid, data)
+
+
+@sio.on("REGISTER_OPERATOR")
+async def REGISTER_OPERATOR(sid: str, data: Dict[str, Any]):
+    payload = {**data, "role": "operator", "clientId": data.get("operatorId", sid)}
+    await REGISTER_CLIENT(sid, payload)
+
+
 @sio.event
 async def OPERATOR_DECLINE_CALL(sid: str, data: Dict[str, Any]):
     call_id = data.get("callId")
