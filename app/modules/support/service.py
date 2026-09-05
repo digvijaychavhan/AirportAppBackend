@@ -32,6 +32,12 @@ online_operators: Dict[str, Dict[str, Any]] = {}
 online_kiosks: Dict[str, Dict[str, Any]] = {}
 active_kiosk_claims: Dict[str, Dict[str, Any]] = {}
 
+REMOTE_CONTROL_INPUT_TYPES = {
+    "mouseMove", "mouseDown", "mouseUp", "click", "dblclick",
+    "mouseWheel", "keyDown", "keyUp", "char", "textInput",
+    "navigate", "scroll"
+}
+
 
 async def cleanup_ghost_connections(timeout_seconds: int = 120) -> Dict[str, int]:
     """
@@ -349,13 +355,16 @@ async def CANCEL_CALL_REQUEST(sid: str, data: Dict[str, Any]):
 async def REGISTER_CLIENT(sid: str, data: Dict[str, Any]):
     role = data.get("role", "kiosk")
     client_id = data.get("clientId", sid)
-    existing_call_id = connected_clients.get(sid, {}).get("active_call_id")
+    previous_client = connected_clients.get(sid, {})
+    existing_call_id = previous_client.get("active_call_id")
+    existing_runtime_env = previous_client.get("runtimeEnv")
 
     connected_clients[sid] = {
         "sid": sid,
         "role": role,
         "clientId": client_id,
-        "active_call_id": existing_call_id
+        "active_call_id": existing_call_id,
+        "runtimeEnv": data.get("runtimeEnv") or existing_runtime_env
     }
 
     if role == "operator":
@@ -398,7 +407,8 @@ async def REGISTER_CLIENT(sid: str, data: Dict[str, Any]):
     if role == "kiosk":
         kiosk_id = client_id or f"KIOSK-{sid[:6]}"
         page_name = data.get("page", "/")
-        runtime_env = data.get("runtimeEnv") or "browser"
+        previous_kiosk = online_kiosks.get(kiosk_id, {})
+        runtime_env = data.get("runtimeEnv") or existing_runtime_env or previous_kiosk.get("runtimeEnv") or "browser"
         session_id = data.get("clientSessionId")
         online_kiosks[kiosk_id] = {
             "kioskId": kiosk_id,
@@ -417,6 +427,7 @@ async def REGISTER_CLIENT(sid: str, data: Dict[str, Any]):
             "sid": sid
         }
         connected_clients[sid]["kioskId"] = kiosk_id
+        connected_clients[sid]["runtimeEnv"] = runtime_env
 
         # Persist runtime_env to database
         try:
@@ -448,14 +459,23 @@ async def KIOSK_HEARTBEAT(sid: str, data: Dict[str, Any]):
     page_name = data.get("page", "/")
     session_id = data.get("clientSessionId")
     if kiosk_id:
+        runtime_env = (
+            data.get("runtimeEnv")
+            or connected_clients.get(sid, {}).get("runtimeEnv")
+            or online_kiosks.get(kiosk_id, {}).get("runtimeEnv")
+            or "browser"
+        )
         online_kiosks[kiosk_id] = {
             "kioskId": kiosk_id,
             "sid": sid,
             "sessionId": session_id,
             "page": page_name,
+            "runtimeEnv": runtime_env,
             "lastSeen": get_current_time().timestamp(),
             "status": "online"
         }
+        if sid in connected_clients:
+            connected_clients[sid]["runtimeEnv"] = runtime_env
         if kiosk_id in active_kiosk_claims:
             active_kiosk_claims[kiosk_id]["lastSeen"] = get_current_time().timestamp()
             if session_id:
@@ -602,6 +622,7 @@ async def CALL_REQUEST(sid: str, data: Dict[str, Any]):
         "callId": call_id,
         "kioskId": kiosk_id,
         "kioskSid": sid,
+        "runtimeEnv": connected_clients.get(sid, {}).get("runtimeEnv", "browser"),
         "operatorId": None,
         "operatorSid": None,
         "allocatedOperatorId": None,
@@ -891,6 +912,41 @@ async def SCREEN_ANNOTATION_STROKE(sid: str, data: Dict[str, Any]):
 
 # --- Live Remote Screen Control & Input Streaming Events ---
 
+def _get_active_remote_call(call_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    if not call_id:
+        return None
+    call = active_calls.get(call_id)
+    if not call or call.get("status") != "IN_PROGRESS":
+        return None
+    return call
+
+
+def _get_kiosk_runtime(call: Dict[str, Any]) -> str:
+    kiosk_sid = call.get("kioskSid")
+    kiosk_id = call.get("kioskId")
+    return (
+        connected_clients.get(kiosk_sid, {}).get("runtimeEnv")
+        or online_kiosks.get(kiosk_id, {}).get("runtimeEnv")
+        or call.get("runtimeEnv")
+        or "browser"
+    )
+
+
+async def _emit_remote_error(sid: str, call_id: Optional[str], code: str, message: str):
+    await sio.emit("REMOTE_CONTROL_ERROR", {
+        "callId": call_id,
+        "code": code,
+        "message": message
+    }, room=sid)
+
+
+async def _emit_to_call_peers(event_name: str, payload: Dict[str, Any], call: Dict[str, Any]):
+    emitted_to = set()
+    for target_sid in (call.get("kioskSid"), call.get("operatorSid")):
+        if target_sid and target_sid not in emitted_to:
+            emitted_to.add(target_sid)
+            await sio.emit(event_name, payload, room=target_sid)
+
 @sio.event
 async def REMOTE_CONTROL_REQUEST(sid: str, data: Dict[str, Any]):
     """Operator requests or triggers remote screen control on caller's kiosk.
@@ -898,18 +954,41 @@ async def REMOTE_CONTROL_REQUEST(sid: str, data: Dict[str, Any]):
     call_id = data.get("callId")
     operator_id = data.get("operatorId")
     operator_name = data.get("operatorName", "Operator")
-    if call_id:
-        room_name = f"call_{call_id}"
-        if call_id in active_calls:
-            active_calls[call_id]["remoteControlActive"] = True
-            active_calls[call_id]["remoteControlOperator"] = operator_name
-        logger.info(f"[RemoteControl] Request initiated for call {call_id} by {operator_name}")
-        await sio.emit("REMOTE_CONTROL_START", {
+    call = _get_active_remote_call(call_id)
+    if not call:
+        await _emit_remote_error(sid, call_id, "CALL_NOT_ACTIVE", "The call is not active.")
+        return
+    if call.get("operatorSid") != sid:
+        await _emit_remote_error(sid, call_id, "NOT_ASSIGNED_OPERATOR", "Only the assigned operator can take control.")
+        return
+
+    kiosk_sid = call.get("kioskSid")
+    if not kiosk_sid:
+        await _emit_remote_error(sid, call_id, "KIOSK_DISCONNECTED", "The client application is disconnected.")
+        return
+
+    runtime_env = _get_kiosk_runtime(call)
+    if runtime_env != "electron":
+        call["remoteControlActive"] = False
+        await sio.emit("REMOTE_CONTROL_UNAVAILABLE", {
             "callId": call_id,
-            "operatorId": operator_id,
-            "operatorName": operator_name,
-            "timestamp": get_current_iso()
-        }, room=room_name, skip_sid=sid)
+            "reason": "BROWSER_CLIENT",
+            "message": "Screen sharing and remote access are available only in the Windows Electron app."
+        }, room=sid)
+        return
+
+    call["remoteControlActive"] = True
+    call["remoteControlOperator"] = operator_name
+    call["remoteControlStartedAt"] = get_current_iso()
+    logger.info(f"[RemoteControl] Control started for call {call_id} by {operator_name}")
+    payload = {
+        "callId": call_id,
+        "operatorId": operator_id,
+        "operatorName": operator_name,
+        "timestamp": call["remoteControlStartedAt"]
+    }
+    await sio.emit("REMOTE_CONTROL_START", payload, room=kiosk_sid)
+    await sio.emit("REMOTE_CONTROL_STARTED", payload, room=sid)
 
 
 @sio.event
@@ -918,16 +997,21 @@ async def REMOTE_CONTROL_STOP(sid: str, data: Dict[str, Any]):
     NOTE: Part of Remote Control Module — do not modify without testing remote access flow."""
     call_id = data.get("callId")
     stopped_by = data.get("stoppedBy", "operator")
-    if call_id:
-        room_name = f"call_{call_id}"
-        if call_id in active_calls:
-            active_calls[call_id]["remoteControlActive"] = False
-        logger.info(f"[RemoteControl] Stopped for call {call_id} by {stopped_by}")
-        await sio.emit("REMOTE_CONTROL_STOPPED", {
-            "callId": call_id,
-            "stoppedBy": stopped_by,
-            "timestamp": get_current_iso()
-        }, room=room_name, skip_sid=sid)
+    call = _get_active_remote_call(call_id)
+    if not call:
+        await _emit_remote_error(sid, call_id, "CALL_NOT_ACTIVE", "The call is not active.")
+        return
+    if sid not in (call.get("operatorSid"), call.get("kioskSid")):
+        await _emit_remote_error(sid, call_id, "NOT_CALL_PARTICIPANT", "Only call participants can stop remote control.")
+        return
+
+    call["remoteControlActive"] = False
+    logger.info(f"[RemoteControl] Stopped for call {call_id} by {stopped_by}")
+    await _emit_to_call_peers("REMOTE_CONTROL_STOPPED", {
+        "callId": call_id,
+        "stoppedBy": stopped_by,
+        "timestamp": get_current_iso()
+    }, call)
 
 
 @sio.event
@@ -935,9 +1019,56 @@ async def REMOTE_CONTROL_EVENT(sid: str, data: Dict[str, Any]):
     """Relays real-time mouse movements, clicks, keys, typing, and scroll events.
     NOTE: Part of Remote Control Module — do not modify without testing remote access flow."""
     call_id = data.get("callId")
-    if call_id:
-        room_name = f"call_{call_id}"
-        await sio.emit("REMOTE_CONTROL_EVENT", data, room=room_name, skip_sid=sid)
+    call = _get_active_remote_call(call_id)
+    if not call or not call.get("remoteControlActive"):
+        await _emit_remote_error(sid, call_id, "CONTROL_NOT_ACTIVE", "Remote control is not active.")
+        return
+    if call.get("operatorSid") != sid:
+        await _emit_remote_error(sid, call_id, "NOT_ASSIGNED_OPERATOR", "Only the assigned operator can send input.")
+        return
+
+    event_type = data.get("type")
+    if event_type not in REMOTE_CONTROL_INPUT_TYPES:
+        await _emit_remote_error(sid, call_id, "INVALID_INPUT", "Unsupported remote input event.")
+        return
+
+    for field in ("normX", "normY"):
+        value = data.get(field)
+        if value is not None and (not isinstance(value, (int, float)) or value < 0 or value > 1):
+            await _emit_remote_error(sid, call_id, "INVALID_COORDINATES", "Remote input coordinates must be between 0 and 1.")
+            return
+
+    if len(str(data.get("text") or "")) > 512:
+        await _emit_remote_error(sid, call_id, "INPUT_TOO_LARGE", "Remote text input is too large.")
+        return
+
+    route = data.get("route")
+    if route and (not isinstance(route, str) or not route.startswith("/") or route.startswith("//")):
+        await _emit_remote_error(sid, call_id, "INVALID_ROUTE", "Remote navigation route is invalid.")
+        return
+
+    kiosk_sid = call.get("kioskSid")
+    if kiosk_sid:
+        await sio.emit("REMOTE_CONTROL_EVENT", data, room=kiosk_sid)
+
+
+@sio.event
+async def REMOTE_CONTROL_UNAVAILABLE(sid: str, data: Dict[str, Any]):
+    """Client reports that app-window capture/control could not be started."""
+    call_id = data.get("callId")
+    call = _get_active_remote_call(call_id)
+    if not call or call.get("kioskSid") != sid:
+        await _emit_remote_error(sid, call_id, "UNAVAILABLE_REJECTED", "Only the active client can report control availability.")
+        return
+
+    call["remoteControlActive"] = False
+    operator_sid = call.get("operatorSid")
+    if operator_sid:
+        await sio.emit("REMOTE_CONTROL_UNAVAILABLE", {
+            "callId": call_id,
+            "reason": data.get("reason") or "CLIENT_UNAVAILABLE",
+            "message": data.get("message") or "Screen sharing and remote access are unavailable on this client."
+        }, room=operator_sid)
 
 
 @sio.event
@@ -946,9 +1077,13 @@ async def REMOTE_SCREEN_OFFER(sid: str, data: Dict[str, Any]):
     NOTE: Part of Remote Control Module — do not modify without testing remote access flow."""
     call_id = data.get("callId")
     sdp = data.get("sdp")
-    if call_id:
-        room_name = f"call_{call_id}"
-        await sio.emit("REMOTE_SCREEN_OFFER", {"callId": call_id, "sdp": sdp}, room=room_name, skip_sid=sid)
+    call = _get_active_remote_call(call_id)
+    if not call or not call.get("remoteControlActive") or call.get("kioskSid") != sid:
+        await _emit_remote_error(sid, call_id, "SCREEN_OFFER_REJECTED", "Screen sharing is not authorized.")
+        return
+    operator_sid = call.get("operatorSid")
+    if operator_sid and sdp:
+        await sio.emit("REMOTE_SCREEN_OFFER", {"callId": call_id, "sdp": sdp}, room=operator_sid)
 
 
 @sio.event
@@ -957,9 +1092,13 @@ async def REMOTE_SCREEN_ANSWER(sid: str, data: Dict[str, Any]):
     NOTE: Part of Remote Control Module — do not modify without testing remote access flow."""
     call_id = data.get("callId")
     sdp = data.get("sdp")
-    if call_id:
-        room_name = f"call_{call_id}"
-        await sio.emit("REMOTE_SCREEN_ANSWER", {"callId": call_id, "sdp": sdp}, room=room_name, skip_sid=sid)
+    call = _get_active_remote_call(call_id)
+    if not call or not call.get("remoteControlActive") or call.get("operatorSid") != sid:
+        await _emit_remote_error(sid, call_id, "SCREEN_ANSWER_REJECTED", "Screen sharing is not authorized.")
+        return
+    kiosk_sid = call.get("kioskSid")
+    if kiosk_sid and sdp:
+        await sio.emit("REMOTE_SCREEN_ANSWER", {"callId": call_id, "sdp": sdp}, room=kiosk_sid)
 
 
 @sio.event
@@ -968,7 +1107,19 @@ async def REMOTE_SCREEN_ICE(sid: str, data: Dict[str, Any]):
     NOTE: Part of Remote Control Module — do not modify without testing remote access flow."""
     call_id = data.get("callId")
     candidate = data.get("candidate")
-    if call_id:
-        room_name = f"call_{call_id}"
-        await sio.emit("REMOTE_SCREEN_ICE", {"callId": call_id, "candidate": candidate}, room=room_name, skip_sid=sid)
+    call = _get_active_remote_call(call_id)
+    if not call or not call.get("remoteControlActive"):
+        await _emit_remote_error(sid, call_id, "SCREEN_ICE_REJECTED", "Screen sharing is not authorized.")
+        return
 
+    target_sid = None
+    if sid == call.get("kioskSid"):
+        target_sid = call.get("operatorSid")
+    elif sid == call.get("operatorSid"):
+        target_sid = call.get("kioskSid")
+    else:
+        await _emit_remote_error(sid, call_id, "NOT_CALL_PARTICIPANT", "Only call participants can exchange screen candidates.")
+        return
+
+    if target_sid and candidate:
+        await sio.emit("REMOTE_SCREEN_ICE", {"callId": call_id, "candidate": candidate}, room=target_sid)

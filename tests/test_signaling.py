@@ -18,12 +18,14 @@ def reset_service_state():
     service.call_queue.clear()
     service.online_operators.clear()
     service.online_kiosks.clear()
+    service.active_kiosk_claims.clear()
     yield
     service.active_calls.clear()
     service.connected_clients.clear()
     service.call_queue.clear()
     service.online_operators.clear()
     service.online_kiosks.clear()
+    service.active_kiosk_claims.clear()
 
 
 @pytest.mark.asyncio
@@ -179,6 +181,100 @@ async def test_webrtc_signaling_and_annotations():
             room=f"call_{call_id}",
             skip_sid=sid
         )
+
+
+@pytest.mark.asyncio
+async def test_remote_control_starts_only_for_assigned_operator_and_electron_client():
+    call_id = "call_remote_electron"
+    operator_sid = "operator_remote_sid"
+    kiosk_sid = "kiosk_remote_sid"
+    service.connected_clients[kiosk_sid] = {
+        "sid": kiosk_sid,
+        "role": "kiosk",
+        "clientId": "KIOSK-01",
+        "runtimeEnv": "electron"
+    }
+    service.active_calls[call_id] = {
+        "callId": call_id,
+        "status": "IN_PROGRESS",
+        "operatorSid": operator_sid,
+        "kioskSid": kiosk_sid,
+        "kioskId": "KIOSK-01"
+    }
+
+    with patch.object(service.sio, "emit", new_callable=AsyncMock) as mock_emit:
+        await service.REMOTE_CONTROL_REQUEST(operator_sid, {
+            "callId": call_id,
+            "operatorId": "op_101",
+            "operatorName": "Priya Sharma"
+        })
+
+        assert service.active_calls[call_id]["remoteControlActive"] is True
+        start_calls = [call for call in mock_emit.call_args_list if call.args[0] == "REMOTE_CONTROL_START"]
+        assert len(start_calls) == 1
+        assert start_calls[0].kwargs["room"] == kiosk_sid
+
+    event = {"callId": call_id, "type": "click", "normX": 0.4, "normY": 0.6}
+    with patch.object(service.sio, "emit", new_callable=AsyncMock) as mock_emit:
+        await service.REMOTE_CONTROL_EVENT(operator_sid, event)
+        mock_emit.assert_called_once_with("REMOTE_CONTROL_EVENT", event, room=kiosk_sid)
+
+
+@pytest.mark.asyncio
+async def test_remote_control_reports_browser_client_as_unavailable():
+    call_id = "call_remote_browser"
+    operator_sid = "operator_browser_sid"
+    kiosk_sid = "kiosk_browser_sid"
+    service.connected_clients[kiosk_sid] = {
+        "sid": kiosk_sid,
+        "role": "kiosk",
+        "clientId": "KIOSK-WEB",
+        "runtimeEnv": "browser"
+    }
+    service.active_calls[call_id] = {
+        "callId": call_id,
+        "status": "IN_PROGRESS",
+        "operatorSid": operator_sid,
+        "kioskSid": kiosk_sid,
+        "kioskId": "KIOSK-WEB"
+    }
+
+    with patch.object(service.sio, "emit", new_callable=AsyncMock) as mock_emit:
+        await service.REMOTE_CONTROL_REQUEST(operator_sid, {
+            "callId": call_id,
+            "operatorId": "op_101",
+            "operatorName": "Priya Sharma"
+        })
+
+        assert service.active_calls[call_id]["remoteControlActive"] is False
+        mock_emit.assert_called_once()
+        assert mock_emit.call_args.args[0] == "REMOTE_CONTROL_UNAVAILABLE"
+        assert mock_emit.call_args.kwargs["room"] == operator_sid
+
+
+@pytest.mark.asyncio
+async def test_remote_input_rejects_unassigned_socket():
+    call_id = "call_remote_forbidden"
+    service.active_calls[call_id] = {
+        "callId": call_id,
+        "status": "IN_PROGRESS",
+        "remoteControlActive": True,
+        "operatorSid": "assigned_operator_sid",
+        "kioskSid": "assigned_kiosk_sid"
+    }
+
+    with patch.object(service.sio, "emit", new_callable=AsyncMock) as mock_emit:
+        await service.REMOTE_CONTROL_EVENT("attacker_sid", {
+            "callId": call_id,
+            "type": "click",
+            "normX": 0.5,
+            "normY": 0.5
+        })
+
+        mock_emit.assert_called_once()
+        assert mock_emit.call_args.args[0] == "REMOTE_CONTROL_ERROR"
+        assert mock_emit.call_args.args[1]["code"] == "NOT_ASSIGNED_OPERATOR"
+        assert mock_emit.call_args.kwargs["room"] == "attacker_sid"
 
 
 @pytest.mark.asyncio
