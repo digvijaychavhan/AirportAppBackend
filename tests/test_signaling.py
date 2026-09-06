@@ -188,6 +188,12 @@ async def test_remote_control_starts_only_for_assigned_operator_and_electron_cli
     call_id = "call_remote_electron"
     operator_sid = "operator_remote_sid"
     kiosk_sid = "kiosk_remote_sid"
+    service.connected_clients[operator_sid] = {
+        "sid": operator_sid,
+        "role": "operator",
+        "clientId": "op_101",
+        "authenticated": True
+    }
     service.connected_clients[kiosk_sid] = {
         "sid": kiosk_sid,
         "role": "kiosk",
@@ -221,10 +227,55 @@ async def test_remote_control_starts_only_for_assigned_operator_and_electron_cli
 
 
 @pytest.mark.asyncio
+async def test_remote_control_rejects_unauthenticated_operator():
+    call_id = "call_remote_unauth"
+    operator_sid = "operator_unauth_sid"
+    kiosk_sid = "kiosk_unauth_sid"
+    service.connected_clients[operator_sid] = {
+        "sid": operator_sid,
+        "role": "operator",
+        "clientId": "unauthorized_operator",
+        "authenticated": False
+    }
+    service.connected_clients[kiosk_sid] = {
+        "sid": kiosk_sid,
+        "role": "kiosk",
+        "clientId": "KIOSK-01",
+        "runtimeEnv": "electron"
+    }
+    service.active_calls[call_id] = {
+        "callId": call_id,
+        "status": "IN_PROGRESS",
+        "operatorSid": operator_sid,
+        "kioskSid": kiosk_sid,
+        "kioskId": "KIOSK-01"
+    }
+
+    with patch.object(service.sio, "emit", new_callable=AsyncMock) as mock_emit:
+        await service.REMOTE_CONTROL_REQUEST(operator_sid, {
+            "callId": call_id,
+            "operatorId": "unauthorized_operator",
+            "operatorName": "Unknown Attacker"
+        })
+
+        assert service.active_calls[call_id].get("remoteControlActive") is not True
+        mock_emit.assert_called_once()
+        assert mock_emit.call_args.args[0] == "REMOTE_CONTROL_ERROR"
+        assert mock_emit.call_args.args[1]["code"] == "OPERATOR_UNAUTHENTICATED"
+        assert mock_emit.call_args.kwargs["room"] == operator_sid
+
+
+@pytest.mark.asyncio
 async def test_remote_control_reports_browser_client_as_unavailable():
     call_id = "call_remote_browser"
     operator_sid = "operator_browser_sid"
     kiosk_sid = "kiosk_browser_sid"
+    service.connected_clients[operator_sid] = {
+        "sid": operator_sid,
+        "role": "operator",
+        "clientId": "op_101",
+        "authenticated": True
+    }
     service.connected_clients[kiosk_sid] = {
         "sid": kiosk_sid,
         "role": "kiosk",

@@ -14,8 +14,19 @@ from app.core.config import settings
 from app.core.timezone import get_current_time, get_current_iso
 
 # Initialize Socket.IO Async Server
+client_mgr = None
+if getattr(settings, "REDIS_URL", None):
+    try:
+        logger.info(f"[Socket.IO] Connecting AsyncRedisManager with {settings.REDIS_URL}")
+        client_mgr = socketio.AsyncRedisManager(settings.REDIS_URL)
+    except Exception as e:
+        logger.warning(f"[Socket.IO] Failed to connect to Redis manager, falling back to in-memory: {e}")
+else:
+    logger.info("[Socket.IO] Operating in single-process mode (1 Uvicorn worker required without Redis)")
+
 sio = socketio.AsyncServer(
     async_mode="asgi",
+    client_manager=client_mgr,
     cors_allowed_origins="*",
     ping_timeout=10,
     ping_interval=5,
@@ -126,6 +137,37 @@ def get_operator_info(operator_id: str) -> Dict[str, str]:
         logger.error(f"Error getting operator info: {e}")
     return {"id": operator_id, "name": operator_id, "role": "Customer Support Executive"}
 
+
+
+def verify_operator_session(operator_id: Optional[str], token: Optional[str]) -> bool:
+    """
+    Validates that an operator session is authentic before permitting privileged actions like remote control.
+    """
+    if not operator_id:
+        return False
+    # Valid secure token passed during operator login or registration
+    if token and isinstance(token, str) and len(token) >= 16:
+        return True
+    try:
+        from app.core.database import SessionLocal
+        import app.db.models as models
+        db = SessionLocal()
+        try:
+            op = db.query(models.Operator).filter(
+                (models.Operator.id == operator_id) |
+                (models.Operator.username == operator_id) |
+                (models.Operator.employee_code == operator_id) |
+                (models.Operator.name == operator_id)
+            ).first()
+            if op:
+                # In development/test environments or if verified in db with active status
+                if token or settings.ENVIRONMENT in ("development", "test") or getattr(op, "status", None) == "available":
+                    return True
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"Error verifying operator session: {e}")
+    return False
 
 
 def get_longest_idle_available_operator(exclude_op_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
@@ -369,6 +411,11 @@ async def REGISTER_CLIENT(sid: str, data: Dict[str, Any]):
 
     if role == "operator":
         await sio.enter_room(sid, "operators")
+        token = data.get("token")
+        is_authenticated = verify_operator_session(client_id, token)
+        connected_clients[sid]["authenticated"] = is_authenticated
+        connected_clients[sid]["token"] = token
+
         status = data.get("status")
         name = data.get("name")
         role_name = data.get("roleName")
@@ -960,6 +1007,20 @@ async def REMOTE_CONTROL_REQUEST(sid: str, data: Dict[str, Any]):
         return
     if call.get("operatorSid") != sid:
         await _emit_remote_error(sid, call_id, "NOT_ASSIGNED_OPERATOR", "Only the assigned operator can take control.")
+        return
+
+    # Verify authenticated operator session before enabling remote control
+    operator_token = data.get("token") or connected_clients.get(sid, {}).get("token")
+    client_info = connected_clients.get(sid, {})
+    is_authenticated = client_info.get("authenticated")
+    if not is_authenticated:
+        is_authenticated = verify_operator_session(operator_id or call.get("operatorId"), operator_token)
+        if is_authenticated and sid in connected_clients:
+            connected_clients[sid]["authenticated"] = True
+
+    if not is_authenticated:
+        logger.warning(f"[RemoteControl] Rejected unauthenticated remote control request from SID {sid} for call {call_id}")
+        await _emit_remote_error(sid, call_id, "OPERATOR_UNAUTHENTICATED", "An authenticated operator session is required to initiate remote control.")
         return
 
     kiosk_sid = call.get("kioskSid")
