@@ -885,8 +885,11 @@ async def get_amenities(db: Session = Depends(get_db)):
             "badgeVariant": p.badge_variant or "purple",
             "x": p.x_coord,
             "y": p.y_coord,
+            "xCoord": p.x_coord,
+            "yCoord": p.y_coord,
             "isActive": p.is_active if p.is_active is not None else True,
-            "rating": p.rating
+            "rating": p.rating,
+            "dietaryTags": p.dietary_tags or ""
         } for p in pois]
         return {"success": True, "count": len(data), "data": data}
     except Exception as e:
@@ -919,10 +922,12 @@ async def create_or_update_amenity(
             poi.image_url = payload.image_url or poi.image_url
             poi.badge_label = payload.badge_label or poi.badge_label
             poi.badge_variant = payload.badge_variant or poi.badge_variant
-            if x_val is not None:
-                poi.x_coord = float(x_val)
-            if y_val is not None:
-                poi.y_coord = float(y_val)
+            poi.x_coord = float(x_val) if x_val is not None else None
+            poi.y_coord = float(y_val) if y_val is not None else None
+            if payload.rating is not None:
+                poi.rating = float(payload.rating)
+            if payload.dietary_tags is not None:
+                poi.dietary_tags = payload.dietary_tags
             if payload.is_active is not None:
                 poi.is_active = payload.is_active
         else:
@@ -943,6 +948,8 @@ async def create_or_update_amenity(
                 badge_variant=payload.badge_variant or "purple",
                 x_coord=float(x_val) if x_val is not None else None,
                 y_coord=float(y_val) if y_val is not None else None,
+                rating=float(payload.rating) if payload.rating is not None else 4.5,
+                dietary_tags=payload.dietary_tags,
                 is_active=payload.is_active if payload.is_active is not None else True
             )
             db.add(poi)

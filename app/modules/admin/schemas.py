@@ -4,7 +4,7 @@ Admin Portal Domain Pydantic V2 Schemas
 
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 
 class BaseAdminSchema(BaseModel):
@@ -115,13 +115,32 @@ class AmenityPayload(BaseAdminSchema):
     y: Optional[float] = None
     x_coord: Optional[float] = Field(None, alias="xCoord")
     y_coord: Optional[float] = Field(None, alias="yCoord")
+    rating: Optional[float] = 4.5
+    dietary_tags: Optional[str] = Field(None, alias="dietaryTags")
     is_active: Optional[bool] = Field(True, alias="isActive")
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def clean_id(cls, v):
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
+
+    @field_validator("x", "y", "x_coord", "y_coord", "rating", mode="before")
+    @classmethod
+    def clean_floats(cls, v):
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return None
+        try:
+            return float(v)
+        except (ValueError, TypeError):
+            return None
 
 
 class CategoryPayload(BaseAdminSchema):
     id: Optional[str] = None
     title: str
-    description: str
+    description: Optional[str] = ""
     photo_url: Optional[str] = Field(None, alias="photoUrl")
     icon: Optional[str] = "place"
     icon_color: Optional[str] = Field("#2563EB", alias="iconColor")
@@ -130,3 +149,10 @@ class CategoryPayload(BaseAdminSchema):
     subcategories: Optional[List[Dict[str, Any]]] = None
     subcategories_json: Optional[str] = Field(None, alias="subcategoriesJson")
     is_active: Optional[bool] = Field(True, alias="isActive")
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def clean_id(cls, v):
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v

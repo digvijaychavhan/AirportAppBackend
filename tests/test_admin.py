@@ -42,6 +42,52 @@ def test_admin_amenities():
     data = response.json()
     assert data["success"] is True
 
+def test_admin_create_and_delete_poi_without_coords():
+    # 1. Create POI with empty string coordinates and empty ID (simulating form submission)
+    payload = {
+        "id": "",
+        "name": "Costa Coffee Airport Test",
+        "category": "dining",
+        "subCategory": "cafe",
+        "description": "Artisanal espresso and coffee",
+        "terminal": "Terminal 3",
+        "floorName": "Level 1",
+        "gate": "Near Gate 14",
+        "operatingHours": "24/7",
+        "dietaryTags": "Vegetarian Options",
+        "rating": "4.8",
+        "imageUrl": "",
+        "xCoord": "",
+        "yCoord": "",
+        "isActive": True
+    }
+    create_res = client.post("/api/v1/admin/amenities", json=payload)
+    assert create_res.status_code == 200, f"Expected 200, got {create_res.status_code}: {create_res.text}"
+    create_data = create_res.json()
+    assert create_data["success"] is True
+    poi_id = create_data["data"]["id"]
+    assert poi_id is not None and poi_id != ""
+
+    # 2. Verify POI is in amenities list with None coordinates
+    list_res = client.get("/api/v1/admin/amenities")
+    assert list_res.status_code == 200
+    all_amenities = list_res.json()["data"]
+    created = next((a for a in all_amenities if a["id"] == poi_id), None)
+    assert created is not None
+    assert created["name"] == "Costa Coffee Airport Test"
+    assert created["x"] is None
+    assert created["y"] is None
+    assert created["dietaryTags"] == "Vegetarian Options"
+
+    # 3. Delete POI
+    del_res = client.delete(f"/api/v1/admin/amenities/{poi_id}")
+    assert del_res.status_code == 200
+    assert del_res.json()["success"] is True
+
+    # 4. Verify POI is deleted
+    list_res_after = client.get("/api/v1/admin/amenities")
+    assert not any(a["id"] == poi_id for a in list_res_after.json()["data"])
+
 def test_admin_scans_and_actions_pagination():
     response = client.get("/api/v1/admin/scans?limit=5&offset=0")
     assert response.status_code == 200
