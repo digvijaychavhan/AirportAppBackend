@@ -433,9 +433,8 @@ async def REGISTER_CLIENT(sid: str, data: Dict[str, Any]):
             online_operators[client_id]["roleName"] = role_name
             if req_status:
                 online_operators[client_id]["status"] = req_status
-            elif online_operators[client_id].get("status") == "OFFLINE":
-                online_operators[client_id]["status"] = "AVAILABLE"
-                online_operators[client_id]["availableSince"] = get_current_time().timestamp()
+                if req_status == "AVAILABLE":
+                    online_operators[client_id]["availableSince"] = get_current_time().timestamp()
         else:
             online_operators[client_id] = {
                 "operatorId": client_id,
@@ -646,6 +645,7 @@ async def OPERATOR_STATUS_UPDATE(sid: str, data: Dict[str, Any]):
 
     if target_keys:
         await sio.emit("OPERATOR_STATE_SYNC", online_operators[target_keys[0]], room=sid)
+        await sio.emit("OPERATOR_STATE_SYNC", online_operators[target_keys[0]], room="operators")
 
     await broadcast_admin_telemetry()
 
