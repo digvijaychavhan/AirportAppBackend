@@ -18,6 +18,13 @@ def run_migrations():
 
         # 2. Check for SQLite column updates
         with engine.connect() as conn:
+            # Self-healing index repair for SQLite
+            try:
+                conn.execute(text("REINDEX;"))
+                conn.commit()
+            except Exception as e:
+                logger.debug(f"Reindex notice: {e}")
+
             # Operators column migrations
             try:
                 op_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(operators);")).fetchall()]
@@ -142,13 +149,19 @@ def run_migrations():
             except Exception as e:
                 logger.warning(f"Notice on screen_annotations migration: {e}")
 
-            # Devices column migrations
+            # Devices column migrations & data integrity check
             try:
                 dev_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(devices);")).fetchall()]
                 if dev_cols:
                     if "runtime_env" not in dev_cols:
                         conn.execute(text("ALTER TABLE devices ADD COLUMN runtime_env VARCHAR DEFAULT 'browser';"))
                         logger.info("Database migration: added runtime_env to devices")
+
+                    # Purge legacy corrupted / column-shifted seed device rows where last_heartbeat is not text/null
+                    # This self-healing step removes rows with misaligned columns so the seeder recreates them cleanly.
+                    result = conn.execute(text("DELETE FROM devices WHERE typeof(last_heartbeat) != 'text' AND last_heartbeat IS NOT NULL;"))
+                    if result.rowcount > 0:
+                        logger.info(f"Database migration: purged {result.rowcount} corrupted/shifted device records from legacy schema")
                     conn.commit()
             except Exception as e:
                 logger.warning(f"Notice on devices migration: {e}")

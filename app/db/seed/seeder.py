@@ -137,8 +137,12 @@ def seed_database(force: bool = False, session=None, custom_engine=None):
                     setattr(existing, k, v)
         db.commit()
 
-        # 9. Devices (Upsert)
-        for d in get_seed_devices():
+        # 9. Devices (Upsert & ensure canonical fleet of 5 seed kiosks)
+        seed_devices = get_seed_devices()
+        seed_device_ids = {d["device_id"] for d in seed_devices}
+        db.query(models.Device).filter(~models.Device.device_id.in_(seed_device_ids)).delete(synchronize_session=False)
+
+        for d in seed_devices:
             existing = db.query(models.Device).filter(models.Device.device_id == d["device_id"]).first()
             if not existing:
                 db.add(models.Device(**d))
