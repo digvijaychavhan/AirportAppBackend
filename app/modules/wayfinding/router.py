@@ -91,7 +91,20 @@ async def get_poi_by_id(poi_id: str, db: Session = Depends(get_db)):
                     "floor": poi.floor_name or "Level 1",
                     "gate": poi.gate or "",
                     "hours": poi.operating_hours or "24 Hours",
-                    "image": poi.image_url or ""
+                    "image": poi.image_url or "",
+                    "mapCode": poi.map_code,
+                    "mapCategory": poi.map_category,
+                    "mapSection": poi.map_section,
+                    "mapIcon": poi.map_icon,
+                    "mapX": poi.map_x,
+                    "mapZ": poi.map_z,
+                    "approachX": poi.approach_x,
+                    "approachZ": poi.approach_z,
+                    "mapSide": poi.map_side,
+                    "mapRotation": poi.map_rotation,
+                    "blockWidth": poi.block_width,
+                    "blockDepth": poi.block_depth,
+                    "mapSource": poi.map_source,
                 }
             }
         raise HTTPException(
@@ -180,7 +193,20 @@ async def get_directory_pois(
             "badge": p.badge_label or "",
             "badgeVariant": p.badge_variant or "purple",
             "rating": p.rating or 4.5,
-            "filter": [s.strip() for s in p.sub_category.split(",")] if p.sub_category else []
+            "filter": [s.strip() for s in p.sub_category.split(",")] if p.sub_category else [],
+            "mapCode": p.map_code,
+            "mapCategory": p.map_category,
+            "mapSection": p.map_section,
+            "mapIcon": p.map_icon,
+            "mapX": p.map_x,
+            "mapZ": p.map_z,
+            "approachX": p.approach_x,
+            "approachZ": p.approach_z,
+            "mapSide": p.map_side,
+            "mapRotation": p.map_rotation,
+            "blockWidth": p.block_width,
+            "blockDepth": p.block_depth,
+            "mapSource": p.map_source,
         } for p in pois]
 
         return {"success": True, "data": data}

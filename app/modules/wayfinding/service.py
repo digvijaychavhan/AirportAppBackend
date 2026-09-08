@@ -329,7 +329,20 @@ class PathfindingEngine:
                             "description": p.description or "",
                             "terminal": p.terminal or "Terminal 3",
                             "gate": p.gate or "",
-                            "is_poi": True
+                            "is_poi": True,
+                            "mapCode": p.map_code,
+                            "mapCategory": p.map_category,
+                            "mapSection": p.map_section,
+                            "mapIcon": p.map_icon,
+                            "mapX": p.map_x,
+                            "mapZ": p.map_z,
+                            "approachX": p.approach_x,
+                            "approachZ": p.approach_z,
+                            "mapSide": p.map_side,
+                            "mapRotation": p.map_rotation,
+                            "blockWidth": p.block_width,
+                            "blockDepth": p.block_depth,
+                            "mapSource": p.map_source,
                         } for p in db_pois]
                 except Exception as e:
                     logger.warning(f"Error querying POIs from DB: {e}")
@@ -338,8 +351,8 @@ class PathfindingEngine:
                         session.close()
 
             if not self._cached_pois:
-                from app.db.seed.data.pois_categories import get_seed_pois
-                raw_pois = get_seed_pois()
+                from app.db.seed.data.terminal1_pois import get_seed_terminal1_pois
+                raw_pois = get_seed_terminal1_pois()
                 self._cached_pois = [{
                     "id": p["id"],
                     "name": p["name"],
@@ -351,7 +364,20 @@ class PathfindingEngine:
                     "description": p.get("description", ""),
                     "terminal": p.get("terminal", "Terminal 3"),
                     "gate": p.get("gate", ""),
-                    "is_poi": True
+                    "is_poi": True,
+                    "mapCode": p.get("map_code"),
+                    "mapCategory": p.get("map_category"),
+                    "mapSection": p.get("map_section"),
+                    "mapIcon": p.get("map_icon"),
+                    "mapX": p.get("map_x"),
+                    "mapZ": p.get("map_z"),
+                    "approachX": p.get("approach_x"),
+                    "approachZ": p.get("approach_z"),
+                    "mapSide": p.get("map_side"),
+                    "mapRotation": p.get("map_rotation"),
+                    "blockWidth": p.get("block_width"),
+                    "blockDepth": p.get("block_depth"),
+                    "mapSource": p.get("map_source"),
                 } for p in raw_pois]
 
         results = list(self._cached_pois or [])
@@ -363,4 +389,3 @@ class PathfindingEngine:
 
 
 pathfinding_engine = PathfindingEngine()
-

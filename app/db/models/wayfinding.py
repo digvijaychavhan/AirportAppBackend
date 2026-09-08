@@ -72,6 +72,21 @@ class Poi(Base):
     image_url = Column(String, nullable=True)
     x_coord = Column(Float, nullable=True)
     y_coord = Column(Float, nullable=True)
+    # Coordinate-built Terminal 1 3D map metadata. The legacy x/y fields are
+    # retained for existing directory/editor clients.
+    map_code = Column(String, nullable=True)
+    map_category = Column(String, nullable=True)
+    map_section = Column(String, nullable=True)
+    map_icon = Column(String, nullable=True)
+    map_x = Column(Float, nullable=True)
+    map_z = Column(Float, nullable=True)
+    approach_x = Column(Float, nullable=True)
+    approach_z = Column(Float, nullable=True)
+    map_side = Column(String, nullable=True)
+    map_rotation = Column(Float, nullable=True, default=0.0)
+    block_width = Column(Float, nullable=True)
+    block_depth = Column(Float, nullable=True)
+    map_source = Column(String, nullable=True, default="admin")
     is_active = Column(Boolean, default=True)
 
     node = relationship("MapNode", back_populates="pois")
@@ -91,4 +106,3 @@ class WayfindingCategory(Base):
     route = Column(String, nullable=False)
     subcategories_json = Column(JSON, nullable=True)
     is_active = Column(Boolean, default=True)
-

@@ -15,7 +15,8 @@ from app.db.seed.data import (
     get_seed_map_edges,
     get_seed_kiosks,
     get_seed_categories,
-    get_seed_pois,
+    get_seed_terminal1_pois,
+    get_legacy_seed_pois,
     get_seed_devices,
     get_seed_operators,
     get_seed_scan_logs,
@@ -105,15 +106,25 @@ def seed_database(force: bool = False, session=None, custom_engine=None):
                     setattr(existing, k, v)
         db.commit()
 
-        # 7. Points of Interest (POIs) (Upsert & Clean)
-        for p in get_seed_pois():
+        # 7. Points of Interest (POIs)
+        # The Terminal 1 3D dataset is the day-zero baseline. Existing records
+        # are deliberately not overwritten so admin edits remain authoritative.
+        # Legacy defaults are archived (not deleted) to prevent T3 records from
+        # appearing alongside the new Terminal 1 directory.
+        terminal1_pois = get_seed_terminal1_pois()
+        terminal1_ids = {p["id"] for p in terminal1_pois}
+        legacy_ids = {p["id"] for p in get_legacy_seed_pois()}
+        for legacy_id in legacy_ids - terminal1_ids:
+            legacy = db.query(models.Poi).filter(models.Poi.id == legacy_id).first()
+            if legacy:
+                legacy.is_active = False
+                if not legacy.map_source:
+                    legacy.map_source = "legacy"
+
+        for p in terminal1_pois:
             existing = db.query(models.Poi).filter(models.Poi.id == p["id"]).first()
             if not existing:
                 db.add(models.Poi(**p))
-            else:
-                for k, v in p.items():
-                    setattr(existing, k, v)
-                existing.is_active = True
         db.commit()
 
         # 8. Flights (Upsert)
