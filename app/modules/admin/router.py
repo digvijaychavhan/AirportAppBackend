@@ -152,10 +152,17 @@ async def get_devices(db: Session = Depends(get_db)):
         data = []
         for d in devices:
             is_active_socket = (d.device_id in active_kiosk_ids) or (d.id in active_kiosk_ids)
-            is_recent = d.last_heartbeat and time_diff_seconds(now, d.last_heartbeat) < 120
+            has_dt = isinstance(d.last_heartbeat, datetime)
+            is_recent = has_dt and time_diff_seconds(now, d.last_heartbeat) < 120
             is_online = is_active_socket or is_recent
             in_memory_kiosk = online_kiosks.get(d.device_id) or online_kiosks.get(d.id) or {}
             detected_env = in_memory_kiosk.get("runtimeEnv") or getattr(d, 'runtime_env', None) or ('electron' if d.cpu_pct is not None else 'browser')
+
+            def safe_float(val, precision=1):
+                try:
+                    return round(float(val), precision) if val is not None else None
+                except (ValueError, TypeError):
+                    return None
 
             data.append({
                 "id": d.id,
@@ -169,21 +176,21 @@ async def get_devices(db: Session = Depends(get_db)):
                 "location": d.location or "",
                 "status": "online" if is_online else "offline",
                 "runtimeEnv": detected_env,
-                "pingMs": d.ping_ms if d.ping_ms is not None else 12,
-                "cpuPct": round(d.cpu_pct, 1) if d.cpu_pct is not None else None,
-                "ramUsedMb": round(d.ram_used_mb, 1) if d.ram_used_mb is not None else None,
-                "ramTotalMb": round(d.ram_total_mb, 1) if d.ram_total_mb is not None else None,
-                "ramPct": round(d.ram_pct, 1) if d.ram_pct is not None else None,
-                "networkBandwidthMbps": round(d.network_bandwidth_mbps, 1) if d.network_bandwidth_mbps is not None else None,
-                "scannerConnected": d.scanner_connected,
+                "pingMs": d.ping_ms if isinstance(d.ping_ms, int) else 12,
+                "cpuPct": safe_float(d.cpu_pct),
+                "ramUsedMb": safe_float(d.ram_used_mb),
+                "ramTotalMb": safe_float(d.ram_total_mb),
+                "ramPct": safe_float(d.ram_pct),
+                "networkBandwidthMbps": safe_float(d.network_bandwidth_mbps),
+                "scannerConnected": d.scanner_connected if isinstance(d.scanner_connected, bool) else None,
                 "scannerWorking": d.scanner_working or d.scanner_status or "N/A",
                 "scannerStatus": d.scanner_status or d.scanner_working or "N/A",
-                "cameraConnected": d.camera_connected,
+                "cameraConnected": d.camera_connected if isinstance(d.camera_connected, bool) else None,
                 "cameraWorking": d.camera_working or d.camera_status or "N/A",
                 "cameraStatus": d.camera_status or d.camera_working or "N/A",
                 "screenStatus": d.screen_status or "OK",
-                "lastHeartbeat": d.last_heartbeat.isoformat() if d.last_heartbeat else None,
-                "createdAt": d.created_at.isoformat() if d.created_at else None
+                "lastHeartbeat": d.last_heartbeat.isoformat() if hasattr(d.last_heartbeat, 'isoformat') else (str(d.last_heartbeat) if d.last_heartbeat else None),
+                "createdAt": d.created_at.isoformat() if hasattr(d.created_at, 'isoformat') else (str(d.created_at) if d.created_at else None)
             })
 
         return {"success": True, "count": len(data), "data": data}

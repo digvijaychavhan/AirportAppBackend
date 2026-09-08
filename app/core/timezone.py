@@ -38,7 +38,7 @@ def to_aware_ist(dt: Optional[datetime]) -> Optional[datetime]:
     """
     Ensures a datetime object loaded from database is timezone-aware in IST.
     """
-    if dt is None:
+    if dt is None or not isinstance(dt, datetime):
         return None
     if dt.tzinfo is None:
         return dt.replace(tzinfo=IST)
