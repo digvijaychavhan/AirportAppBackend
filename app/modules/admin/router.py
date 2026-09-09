@@ -231,9 +231,14 @@ async def record_telemetry_heartbeat(
 
         # Update telemetry statistics
         dev.runtime_env = payload.runtime_env or ("electron" if payload.cpu_pct is not None else "browser")
-        dev.scanner_connected = payload.scanner_connected
-        dev.scanner_working = payload.scanner_working
-        dev.scanner_status = payload.scanner_working
+        if dev.runtime_env == "browser" and not payload.scanner_connected:
+            dev.scanner_connected = None
+            dev.scanner_working = "N/A"
+            dev.scanner_status = "N/A"
+        else:
+            dev.scanner_connected = payload.scanner_connected
+            dev.scanner_working = payload.scanner_working
+            dev.scanner_status = payload.scanner_working
         dev.camera_connected = payload.camera_connected
         dev.camera_working = payload.camera_working
         dev.camera_status = payload.camera_working

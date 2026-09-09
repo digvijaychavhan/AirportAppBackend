@@ -552,6 +552,10 @@ async def KIOSK_HEARTBEAT(sid: str, data: Dict[str, Any]):
                     if "scannerWorking" in data:
                         dev.scanner_working = data.get("scannerWorking")
                         dev.scanner_status = data.get("scannerWorking")
+                    if dev.runtime_env == "browser" and not dev.scanner_connected:
+                        dev.scanner_connected = None
+                        dev.scanner_working = "N/A"
+                        dev.scanner_status = "N/A"
                     if "cameraConnected" in data:
                         dev.camera_connected = data.get("cameraConnected")
                     if "cameraWorking" in data:
