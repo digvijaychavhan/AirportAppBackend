@@ -22,6 +22,7 @@ class FeedbackSubmission(Base, TimestampMixin):
     food_rating = Column(Integer, nullable=False)
     comments = Column(Text, nullable=True)
     contact_phone = Column(String, nullable=True)
+    contact_email = Column(String, nullable=True)
 
 
 

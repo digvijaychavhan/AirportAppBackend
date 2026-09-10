@@ -79,6 +79,15 @@ async def submit_feedback(
         food = ratings.get("facilities", ratings.get("food", payload.food_rating or 5))
         overall = ratings.get("overall", payload.overall_rating or 5)
 
+        contact_phone = payload.contact_phone
+        contact_email = payload.contact_email
+        if payload.contact_info:
+            info = payload.contact_info.strip()
+            if "@" in info:
+                contact_email = contact_email or info
+            else:
+                contact_phone = contact_phone or info
+
         feedback_obj = models.FeedbackSubmission(
             kiosk_id=payload.kiosk_id or "T3-L1-K04",
             flight_number=payload.flight_number,
@@ -90,7 +99,8 @@ async def submit_feedback(
             wifi_rating=wifi,
             food_rating=food,
             comments=payload.comments,
-            contact_phone=payload.contact_phone
+            contact_phone=contact_phone,
+            contact_email=contact_email
         )
 
         db.add(feedback_obj)

@@ -23,3 +23,5 @@ class FeedbackCreate(BaseFeedbackSchema):
     food_rating: Optional[int] = Field(5, ge=1, le=5, alias="foodRating")
     comments: Optional[str] = ""
     contact_phone: Optional[str] = Field(None, alias="contactPhone")
+    contact_email: Optional[str] = Field(None, alias="contactEmail")
+    contact_info: Optional[str] = Field(None, alias="contactInfo")

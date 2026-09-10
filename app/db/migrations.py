@@ -166,6 +166,16 @@ def run_migrations():
             except Exception as e:
                 logger.warning(f"Notice on devices migration: {e}")
 
+            # Feedback Submissions column migrations
+            try:
+                fb_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(feedback_submissions);")).fetchall()]
+                if fb_cols and "contact_email" not in fb_cols:
+                    conn.execute(text("ALTER TABLE feedback_submissions ADD COLUMN contact_email VARCHAR;"))
+                    logger.info("Database migration: added contact_email to feedback_submissions")
+                    conn.commit()
+            except Exception as e:
+                logger.warning(f"Notice on feedback_submissions migration: {e}")
+
         logger.info("Database schema migration verification completed.")
 
     except Exception as e:
