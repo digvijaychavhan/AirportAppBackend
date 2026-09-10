@@ -75,6 +75,7 @@ def _record(
     icon: Optional[str] = None,
     rotation: float = 0.0,
     block: Optional[Tuple[float, float]] = None,
+    sub_category: Optional[str] = None,
 ) -> Dict:
     position = _round_point(position)
     approach = _round_point(approach)
@@ -85,7 +86,7 @@ def _record(
         "id": poi_id,
         "name": name,
         "category": db_category,
-        "sub_category": category,
+        "sub_category": sub_category or category,
         "description": "",
         "operating_hours": "24 Hours",
         "terminal": "Terminal 1",
@@ -116,16 +117,16 @@ def _record(
 
 def _checkin_pois() -> List[Dict]:
     entries = [
-        ("checkin-retail-1", "1", "Neo Travel", "retail", "shopping_bag", (13, 6.5), (13, 4.9), "south", (3.5, 1.6)),
-        ("checkin-service-2", "2", "En-wrap (Baggage Wrap)", "service", "luggage", (8, 6.5), (8, 4.9), "south", (3.5, 1.6)),
-        ("checkin-food-3", "3", "TWC", "food", "restaurant", (3, 6.5), (3, 4.9), "south", (3.5, 1.6)),
-        ("checkin-business-class", "BC", "Business Class Check-in", "service", "workspace_premium", (19, -5.5), (16.8, -5.5), "east", (3, 2)),
-        ("checkin-security", "SEC", "Domestic Security Check", "service", "security", (10, -11), (10, -8.7), "center", None),
-        ("checkin-information", "i", "Information Desk", "service", "info", (8, 3.5), (6.3, 3.5), "center", None),
-        ("checkin-water", "W", "Drinking Water", "amenity", "water_drop", (-20, 1.5), (-18.2, 1.5), "west", None),
-        ("checkin-baby-care", "BC", "Baby Care", "amenity", "baby_changing_station", (20, 1.5), (18.2, 1.5), "east", None),
-        ("checkin-prm-toilet", "PRM", "Accessible Toilet", "amenity", "accessible", (-20, -5), (-18.2, -5), "west", None),
-        ("checkin-toilets", "WC", "Toilets", "amenity", "wc", (20, -5), (18.2, -7), "east", None),
+        ("checkin-retail-1", "1", "Neo Travel", "retail", "shopping_bag", (13, 6.5), (13, 4.9), "south", (3.5, 1.6), "convenience"),
+        ("checkin-service-2", "2", "En-wrap (Baggage Wrap)", "service", "luggage", (8, 6.5), (8, 4.9), "south", (3.5, 1.6), "baggage"),
+        ("checkin-food-3", "3", "TWC", "food", "restaurant", (3, 6.5), (3, 4.9), "south", (3.5, 1.6), "cafe"),
+        ("checkin-business-class", "BC", "Business Class Check-in", "service", "workspace_premium", (19, -5.5), (16.8, -5.5), "east", (3, 2), "assistance"),
+        ("checkin-security", "SEC", "Domestic Security Check", "service", "security", (10, -11), (10, -8.7), "center", None, "assistance"),
+        ("checkin-information", "i", "Information Desk", "service", "info", (8, 3.5), (6.3, 3.5), "center", None, "assistance"),
+        ("checkin-water", "W", "Drinking Water", "amenity", "water_drop", (-20, 1.5), (-18.2, 1.5), "west", None, "water"),
+        ("checkin-baby-care", "BC", "Baby Care", "amenity", "baby_changing_station", (20, 1.5), (18.2, 1.5), "east", None, "babycare"),
+        ("checkin-prm-toilet", "PRM", "Accessible Toilet", "amenity", "accessible", (-20, -5), (-18.2, -5), "west", None, "accessible"),
+        ("checkin-toilets", "WC", "Toilets", "amenity", "wc", (20, -5), (18.2, -7), "east", None, "restroom"),
     ]
     return [
         _record(
@@ -139,8 +140,9 @@ def _checkin_pois() -> List[Dict]:
             side=side,
             icon=icon,
             block=block,
+            sub_category=sub_category,
         )
-        for poi_id, code, name, category, icon, position, approach, side, block in entries
+        for poi_id, code, name, category, icon, position, approach, side, block, sub_category in entries
     ]
 
 
@@ -236,16 +238,16 @@ def _departure_business_pois() -> List[Dict]:
 
 
 DEPARTURE_AMENITIES = [
-    ("departure-info", "i", "Information Desk with Wi-Fi", "service", "info", (22, -10), (20, -9), "center"),
-    ("departure-lift", "L", "Lift", "amenity", "elevator", (7, -7), (9, -6.5), "west"),
-    ("departure-escalator", "E", "Escalator", "amenity", "escalator", (30, -11), (28, -10), "east"),
-    ("departure-toilets", "WC", "Toilets", "amenity", "wc", (36, -12), (34, -7.5), "east"),
-    ("departure-prm", "PRM", "PRM Toilet", "amenity", "accessible", (10, -13), (12, -12), "north"),
-    ("departure-water", "W", "Drinking Water", "amenity", "water_drop", (34, -1), (32, -1), "east"),
-    ("departure-smoking", "S", "Smoking Area", "amenity", "smoking_rooms", (38, -4), (35.5, -4), "east"),
-    ("departure-food-court", "FC", "Food Court Connection", "food", "restaurant", (31, -8), (29, -7), "east"),
-    ("departure-gates-27-36", "27–36", "Towards Gates 27–36", "gate", "flight_takeoff", (4, -13.5), (6, -12), "north"),
-    ("departure-bus-gates", "31–45", "Towards Bus Gates 31–45", "gate", "directions_bus", (27, -15.5), (26, -11.5), "north"),
+    ("departure-info", "i", "Information Desk with Wi-Fi", "service", "info", (22, -10), (20, -9), "center", "assistance"),
+    ("departure-lift", "L", "Lift", "amenity", "elevator", (7, -7), (9, -6.5), "west", "transit"),
+    ("departure-escalator", "E", "Escalator", "amenity", "escalator", (30, -11), (28, -10), "east", "transit"),
+    ("departure-toilets", "WC", "Toilets", "amenity", "wc", (36, -12), (34, -7.5), "east", "restroom"),
+    ("departure-prm", "PRM", "PRM Toilet", "amenity", "accessible", (10, -13), (12, -12), "north", "accessible"),
+    ("departure-water", "W", "Drinking Water", "amenity", "water_drop", (34, -1), (32, -1), "east", "water"),
+    ("departure-smoking", "S", "Smoking Area", "amenity", "smoking_rooms", (38, -4), (35.5, -4), "east", "smoking"),
+    ("departure-food-court", "FC", "Food Court Connection", "food", "restaurant", (31, -8), (29, -7), "east", "food"),
+    ("departure-gates-27-36", "27–36", "Towards Gates 27–36", "gate", "flight_takeoff", (4, -13.5), (6, -12), "north", "gate"),
+    ("departure-bus-gates", "31–45", "Towards Bus Gates 31–45", "gate", "directions_bus", (27, -15.5), (26, -11.5), "north", "gate"),
 ]
 
 
@@ -261,8 +263,9 @@ def _departure_amenity_pois() -> List[Dict]:
             approach=approach,
             side=side,
             icon=icon,
+            sub_category=sub_category,
         )
-        for poi_id, code, name, category, icon, position, approach, side in DEPARTURE_AMENITIES
+        for poi_id, code, name, category, icon, position, approach, side, sub_category in DEPARTURE_AMENITIES
     ]
 
 
@@ -325,10 +328,10 @@ def _pier_gate_pois() -> List[Dict]:
 
 
 PIER_AMENITIES = [
-    ("piers-toilets-west", "WC", "Toilets — Near Gates 05–07", "wc", (13, -2.8), (11.5, -1.5), "north"),
-    ("piers-prm", "PRM", "PRM Toilet", "accessible", (31, 2.8), (29.5, 1.4), "south"),
-    ("piers-water", "W", "Drinking Water", "water_drop", (48, -2.8), (46.5, -1.4), "north"),
-    ("piers-travelator", "T", "Travelator", "moving_walkway", (38, 0), (36.5, 0), "center"),
+    ("piers-toilets-west", "WC", "Toilets — Near Gates 05–07", "wc", (13, -2.8), (11.5, -1.5), "north", "restroom"),
+    ("piers-prm", "PRM", "PRM Toilet", "accessible", (31, 2.8), (29.5, 1.4), "south", "accessible"),
+    ("piers-water", "W", "Drinking Water", "water_drop", (48, -2.8), (46.5, -1.4), "north", "water"),
+    ("piers-travelator", "T", "Travelator", "moving_walkway", (38, 0), (36.5, 0), "center", "transit"),
 ]
 
 
@@ -345,8 +348,9 @@ def _pier_amenity_pois() -> List[Dict]:
             side=side,
             icon=icon,
             rotation=PIER_ROTATION,
+            sub_category=sub_category,
         )
-        for poi_id, code, name, icon, position, approach, side in PIER_AMENITIES
+        for poi_id, code, name, icon, position, approach, side, sub_category in PIER_AMENITIES
     ]
 
 

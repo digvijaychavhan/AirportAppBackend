@@ -119,7 +119,8 @@ def get_seed_categories():
                 {"id": "charging", "label": "Charging Station", "icon": "power"},
                 {"id": "accessible", "label": "Accessibility", "icon": "accessible"},
                 {"id": "wifi", "label": "Free Wi-Fi", "icon": "wifi"},
-                {"id": "trolley", "label": "Luggage Trolleys", "icon": "shopping_cart"}
+                {"id": "trolley", "label": "Luggage Trolleys", "icon": "shopping_cart"},
+                {"id": "transit", "label": "Lifts & Escalators", "icon": "elevator"}
             ])
         },
     ]
