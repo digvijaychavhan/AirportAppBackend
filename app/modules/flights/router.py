@@ -5,6 +5,7 @@ Flights REST Router
 import re
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 from app.core.database import get_db
 from app.core.logging import logger
@@ -29,9 +30,10 @@ router = APIRouter(tags=["Flights"])
 @router.get("/api/v1/flights/search")
 async def search_flights(
     query: Optional[str] = Query(None, description="Search term for flight number, destination, or airline"),
+    q: Optional[str] = Query(None, description="Alternative alias for query"),
     date: Optional[str] = Query(None, description="Filter date in YYYY-MM-DD format"),
     airline: Optional[str] = Query(None, description="Filter by airline code (e.g. 6E, AI)"),
-    terminal: Optional[str] = Query(None, description="Filter by terminal (e.g. Terminal 3, T3)"),
+    terminal: Optional[str] = Query(None, description="Filter by terminal (e.g. Terminal 1, T1)"),
     limit: int = Query(50, ge=1, le=200, description="Number of records to return"),
     offset: int = Query(0, ge=0, description="Number of records to skip"),
     db: Session = Depends(get_db)
@@ -39,15 +41,19 @@ async def search_flights(
     """
     Search flights with live SQL database records, pagination, and dynamic query matching.
     """
-    raw_query = query.strip() if query else ""
+    search_term = query or q or ""
+    raw_query = search_term.strip()
     clean_q = re.sub(r"\s+", "", raw_query).upper()
 
     db_query = db.query(models.Flight).options(joinedload(models.Flight.airline))
 
     if clean_q:
         search_pattern = f"%{clean_q}%"
+        raw_pattern = f"%{raw_query}%"
         db_query = db_query.filter(
-            (models.Flight.flight_number.ilike(search_pattern)) |
+            (func.replace(models.Flight.flight_number, " ", "").ilike(search_pattern)) |
+            (models.Flight.flight_number.ilike(raw_pattern)) |
+            (models.Flight.destination_name.ilike(raw_pattern)) |
             (models.Flight.destination_name.ilike(search_pattern)) |
             (models.Flight.destination_iata.ilike(search_pattern)) |
             (models.Flight.airline_code.ilike(search_pattern))
