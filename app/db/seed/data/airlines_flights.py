@@ -16,6 +16,20 @@ def get_seed_airlines():
     ]
 
 def get_seed_flights():
+    """
+    Returns canonical seed departure flights for Terminal 1.
+
+    NOTE FOR FUTURE AI AGENTS & DEVELOPERS:
+    These flights represent DEPARTURES departing from DEL (Terminal 1).
+    Departing passengers check in their luggage at check-in counters and proceed through
+    security to their boarding gates. Baggage claim belts (carousels) are NOT used or needed
+    for departure flights; baggage belts are strictly for ARRIVAL flights where passengers
+    pick up luggage at their destination.
+    However, because the SQL Flight table schema defines `baggage_belt = Column(String, nullable=False)`,
+    this column cannot be null in the database.
+    Therefore, all departure seed flights deliberately set `"baggage_belt": "N/A"`.
+    Do not populate real baggage carousels for departure flights.
+    """
     now = get_current_time()
     return [
         {
@@ -30,7 +44,7 @@ def get_seed_flights():
             "terminal": "Terminal 1",
             "gate": "12",
             "checkin_counters": "Counters 12–24",
-            "baggage_belt": "Belt 04",
+            "baggage_belt": "N/A",  # Not needed for departure flights; set to "N/A" to satisfy non-null DB constraint
             "status": "BOARDING"
         },
         {
@@ -45,7 +59,7 @@ def get_seed_flights():
             "terminal": "Terminal 1",
             "gate": "05",
             "checkin_counters": "Counters 01–10",
-            "baggage_belt": "Belt 02",
+            "baggage_belt": "N/A",  # Not needed for departure flights; set to "N/A" to satisfy non-null DB constraint
             "status": "DELAYED"
         },
         {
@@ -60,7 +74,7 @@ def get_seed_flights():
             "terminal": "Terminal 1",
             "gate": "08",
             "checkin_counters": "Counters 01–10",
-            "baggage_belt": "Belt 01",
+            "baggage_belt": "N/A",  # Not needed for departure flights; set to "N/A" to satisfy non-null DB constraint
             "status": "ON TIME"
         },
         {
@@ -75,7 +89,7 @@ def get_seed_flights():
             "terminal": "Terminal 1",
             "gate": "14",
             "checkin_counters": "Counters 25–32",
-            "baggage_belt": "Belt 03",
+            "baggage_belt": "N/A",  # Not needed for departure flights; set to "N/A" to satisfy non-null DB constraint
             "status": "ON TIME"
         },
         {
@@ -90,7 +104,7 @@ def get_seed_flights():
             "terminal": "Terminal 1",
             "gate": "03",
             "checkin_counters": "Counters 08–14",
-            "baggage_belt": "Belt 02",
+            "baggage_belt": "N/A",  # Not needed for departure flights; set to "N/A" to satisfy non-null DB constraint
             "status": "DELAYED"
         },
         {
@@ -105,7 +119,7 @@ def get_seed_flights():
             "terminal": "Terminal 1",
             "gate": "18",
             "checkin_counters": "Counters 35–42",
-            "baggage_belt": "Belt 04",
+            "baggage_belt": "N/A",  # Not needed for departure flights; set to "N/A" to satisfy non-null DB constraint
             "status": "ON TIME"
         }
     ]
