@@ -62,6 +62,64 @@ def _round_point(point: MapPoint) -> MapPoint:
     return round(point[0], 6), round(point[1], 6)
 
 
+POI_IMAGE_URLS: Dict[str, str] = {
+    # Dining (20)
+    "checkin-food-3": "/restaurants/third-wave-coffee.png",
+    "departure-food-4": "/restaurants/street-burger.jpg",
+    "departure-food-5": "/restaurants/irish-house.jpg",
+    "departure-food-11": "/restaurants/hello-mercato.jpg",
+    "departure-food-20": "/restaurants/chocobay.jpg",
+    "departure-food-21": "/restaurants/mishtaan-food.jpg",
+    "departure-food-25": "/restaurants/express-idli.jpg",
+    "departure-food-26": "/restaurants/masala-kitchen.jpg",
+    "departure-food-27": "/restaurants/tim-hortons.jpg",
+    "departure-food-court": "/restaurants/food-court.jpg",
+    "piers-food-1": "/restaurants/masala-kitchen.jpg",
+    "piers-food-2": "/restaurants/idli-express.jpg",
+    "piers-food-3": "/restaurants/dolce-torino.jpg",
+    "piers-food-5": "/restaurants/momo-express.jpg",
+    "piers-food-6": "/restaurants/barista.jpg",
+    "piers-food-10": "/restaurants/sugar-spice.jpg",
+    "piers-food-11": "/restaurants/burger-pizza.jpg",
+    "piers-food-13": "/restaurants/delhi-cafeccino.jpg",
+    "piers-food-14": "/restaurants/flying-bites.jpg",
+    "poi_15caf945": "/restaurants/nescafe-cafe.jpg",
+    # Shopping (32)
+    "checkin-retail-1": "/shopping/neo-travel.jpg",
+    "departure-retail-1": "/shopping/armani-exchange.jpg",
+    "departure-retail-2": "/shopping/helios-luxe.jpg",
+    "departure-retail-6": "/shopping/chanel.jpg",
+    "departure-retail-7": "/shopping/croma.jpg",
+    "departure-retail-8": "/shopping/hamleys.jpg",
+    "departure-retail-9": "/shopping/miniso.jpg",
+    "departure-retail-10": "/shopping/encalm-spa.jpg",
+    "departure-retail-12": "/shopping/accessorize.jpg",
+    "departure-retail-13": "/shopping/w-fashion.jpg",
+    "departure-retail-14": "/shopping/biba.jpg",
+    "departure-retail-15": "/shopping/skechers.jpg",
+    "departure-retail-16": "/shopping/hush-puppies.jpg",
+    "departure-retail-17": "/shopping/da-milano.jpg",
+    "departure-retail-18": "/shopping/hidesign.png",
+    "departure-retail-19": "/shopping/vip.jpg",
+    "departure-retail-22": "/shopping/relay-books.png",
+    "departure-retail-23": "/shopping/apollo-pharmacy.jpg",
+    "departure-retail-24": "/shopping/encalm-lounge.jpg",
+    "departure-retail-28": "/shopping/artport.jpg",
+    "departure-retail-29": "/shopping/bodyshop.jpg",
+    "departure-retail-30": "/shopping/forest-essentials.jpg",
+    "departure-retail-31": "/shopping/olfactive.jpg",
+    "departure-retail-32": "/shopping/loccitane.jpg",
+    "departure-retail-33": "/shopping/runway.jpg",
+    "departure-retail-34": "/shopping/nappa-dori.jpg",
+    "departure-retail-35": "/shopping/swarovski.jpg",
+    "departure-retail-36": "/shopping/shoppers-stop.jpg",
+    "piers-retail-4": "/shopping/mishtaan-retail.jpg",
+    "piers-retail-7": "/shopping/patanjali.jpg",
+    "piers-retail-9": "/shopping/guardian-pharmacy.jpg",
+    "piers-retail-12": "/shopping/mishtaan-retail.jpg",
+}
+
+
 def _record(
     *,
     poi_id: str,
@@ -76,6 +134,7 @@ def _record(
     rotation: float = 0.0,
     block: Optional[Tuple[float, float]] = None,
     sub_category: Optional[str] = None,
+    image_url: Optional[str] = None,
 ) -> Dict:
     position = _round_point(position)
     approach = _round_point(approach)
@@ -95,7 +154,7 @@ def _record(
         "distance_m": 0,
         "badge_label": None,
         "badge_variant": None,
-        "image_url": None,
+        "image_url": image_url or POI_IMAGE_URLS.get(poi_id),
         "x_coord": position[0],
         "y_coord": position[1],
         "is_active": True,

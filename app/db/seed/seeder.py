@@ -125,8 +125,11 @@ def seed_database(force: bool = False, session=None, custom_engine=None):
             existing = db.query(models.Poi).filter(models.Poi.id == p["id"]).first()
             if not existing:
                 db.add(models.Poi(**p))
-            elif existing.sub_category in (None, "", "amenity") and p.get("sub_category"):
-                existing.sub_category = p["sub_category"]
+            else:
+                if existing.sub_category in (None, "", "amenity") and p.get("sub_category"):
+                    existing.sub_category = p["sub_category"]
+                if (not existing.image_url) and p.get("image_url"):
+                    existing.image_url = p["image_url"]
         db.commit()
 
         # 8. Flights (Upsert)

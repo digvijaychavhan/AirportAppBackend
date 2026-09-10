@@ -190,6 +190,7 @@ async def get_directory_pois(
             "gate": p.gate or "",
             "distanceM": p.distance_m or 100,
             "image": p.image_url or "",
+            "imageUrl": p.image_url or "",
             "badge": p.badge_label or "",
             "badgeVariant": p.badge_variant or "purple",
             "rating": p.rating or 4.5,
