@@ -67,6 +67,8 @@ async def claim_kiosk(
                     (models.Device.device_id == kid) | (models.Device.id == kid)
                 ).first()
                 if dev:
+                    dev.status = "online"
+                    db.commit()
                     claim_info["lastSeen"] = now_ts
                     claim_info["runtimeEnv"] = req_env
                     return {
@@ -100,6 +102,8 @@ async def claim_kiosk(
                 (models.Device.device_id == pref_id) | (models.Device.id == pref_id)
             ).first()
             if existing:
+                existing.status = "online"
+                db.commit()
                 active_kiosk_claims[existing.device_id] = {
                     "sessionId": session_id,
                     "runtimeEnv": req_env,
@@ -159,6 +163,8 @@ async def claim_kiosk(
             db.commit()
 
     # Record the newly assigned kiosk claim
+    assigned.status = "online"
+    db.commit()
     active_kiosk_claims[assigned.device_id] = {
         "sessionId": session_id,
         "runtimeEnv": req_env,

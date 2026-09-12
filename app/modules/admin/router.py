@@ -152,9 +152,7 @@ async def get_devices(db: Session = Depends(get_db)):
         data = []
         for d in devices:
             is_active_socket = (d.device_id in active_kiosk_ids) or (d.id in active_kiosk_ids)
-            has_dt = isinstance(d.last_heartbeat, datetime)
-            is_recent = has_dt and time_diff_seconds(now, d.last_heartbeat) < 120
-            is_online = is_active_socket or is_recent
+            is_online = is_active_socket
             in_memory_kiosk = online_kiosks.get(d.device_id) or online_kiosks.get(d.id) or {}
             detected_env = in_memory_kiosk.get("runtimeEnv") or getattr(d, 'runtime_env', None) or ('electron' if d.cpu_pct is not None else 'browser')
 
@@ -478,6 +476,21 @@ async def operator_login(payload: OperatorLoginPayload, db: Session = Depends(ge
         op.status = "available"
         db.commit()
 
+        # Update in-memory online_operators immediately
+        online_operators[op.id] = {
+            "operatorId": op.id,
+            "sid": None,
+            "name": op.name,
+            "roleName": op.role,
+            "status": "AVAILABLE",
+            "availableSince": get_current_time().timestamp(),
+            "currentCallId": None
+        }
+
+        from app.modules.support.service import broadcast_admin_telemetry
+        await sio.emit("OPERATORS_UPDATED", {"operatorId": op.id, "status": "available"})
+        await broadcast_admin_telemetry()
+
         return {
             "success": True,
             "message": "Login successful",
@@ -593,9 +606,15 @@ async def set_operator_status(
         db.commit()
 
         # Sync in-memory state
+        target_op_id = op.id
         for k, v in list(online_operators.items()):
             if k in [op.id, op.username, op.employee_code] or v.get("operatorId") in [op.id, op.username, op.employee_code]:
                 v["status"] = status_val.upper()
+                target_op_id = v.get("operatorId", op.id)
+
+        from app.modules.support.service import broadcast_admin_telemetry
+        await sio.emit("OPERATORS_UPDATED", {"operatorId": target_op_id, "status": status_val})
+        await broadcast_admin_telemetry()
 
         return {"success": True, "operatorId": op.id, "status": status_val}
     except HTTPException:

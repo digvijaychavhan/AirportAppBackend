@@ -14,7 +14,7 @@ try:
         model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
         PROJECT_NAME: str = Field(default="Airport Digital Helpdesk Backend")
-        VERSION: str = Field(default="7.3.4")
+        VERSION: str = Field(default="7.3.8")
         ENVIRONMENT: str = Field(default="development")
         PORT: int = Field(default=5000)
         WORKERS: int = Field(default=1)
@@ -28,7 +28,7 @@ try:
 except Exception:
     class SettingsFallback:
         PROJECT_NAME: str = "Airport Digital Helpdesk Backend"
-        VERSION: str = "7.3.4"
+        VERSION: str = "7.3.8"
         ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
         PORT: int = int(os.getenv("PORT", "5000"))
         WORKERS: int = int(os.getenv("WORKERS", "1"))

@@ -60,21 +60,42 @@ async def cleanup_ghost_connections(timeout_seconds: int = 120) -> Dict[str, int
     cleaned_kiosks = 0
     cleaned_calls = 0
 
-    # 1. Audit operators with dead sockets or stale state
-    for op_id, op_data in list(online_operators.items()):
-        sid = op_data.get("sid")
-        if sid and sid not in connected_clients:
-            op_data["sid"] = None
-            op_data["status"] = "OFFLINE"
-            cleaned_ops += 1
+    from app.core.database import SessionLocal
+    import app.db.models as models
+    db = SessionLocal()
+    try:
+        # 1. Audit operators with dead sockets or stale state
+        for op_id, op_data in list(online_operators.items()):
+            sid = op_data.get("sid")
+            if sid and sid not in connected_clients:
+                op_data["sid"] = None
+                op_data["status"] = "OFFLINE"
+                cleaned_ops += 1
+                op_row = db.query(models.Operator).filter(
+                    (models.Operator.id == op_id) | (models.Operator.username == op_id) | (models.Operator.employee_code == op_id)
+                ).first()
+                if op_row:
+                    op_row.status = "offline"
 
-    # 2. Audit kiosks with timed out heartbeats
-    for kiosk_id, kiosk_data in list(online_kiosks.items()):
-        last_seen = kiosk_data.get("lastSeen", 0)
-        sid = kiosk_data.get("sid")
-        if (sid and sid not in connected_clients) or (now_ts - last_seen > timeout_seconds):
-            online_kiosks.pop(kiosk_id, None)
-            cleaned_kiosks += 1
+        # 2. Audit kiosks with timed out heartbeats
+        for kiosk_id, kiosk_data in list(online_kiosks.items()):
+            last_seen = kiosk_data.get("lastSeen", 0)
+            sid = kiosk_data.get("sid")
+            if (sid and sid not in connected_clients) or (now_ts - last_seen > timeout_seconds):
+                online_kiosks.pop(kiosk_id, None)
+                active_kiosk_claims.pop(kiosk_id, None)
+                cleaned_kiosks += 1
+                dev = db.query(models.Device).filter(
+                    (models.Device.device_id == kiosk_id) | (models.Device.id == kiosk_id)
+                ).first()
+                if dev:
+                    dev.status = "offline"
+
+        db.commit()
+    except Exception as e:
+        logger.error(f"Error during cleanup_ghost_connections db sync: {e}")
+    finally:
+        db.close()
 
     # 3. Clean stale calls waiting in queue whose kiosk disconnected
     active_kiosk_sids = set(connected_clients.keys())
@@ -218,24 +239,50 @@ async def check_and_dispatch_queued_calls():
 
 async def broadcast_admin_telemetry():
     try:
-        available_count = len([op for op in online_operators.values() if (op.get("status") or "").upper() == "AVAILABLE"])
-        busy_count = len([op for op in online_operators.values() if (op.get("status") or "").upper() in ["BUSY", "IN_CALL", "IN CALL"]])
+        available_count = len([
+            op for op in online_operators.values()
+            if (op.get("sid") in connected_clients or op.get("sid")) and (op.get("status") or "").upper() == "AVAILABLE"
+        ])
+        in_meeting_count = len([
+            op for op in online_operators.values()
+            if (op.get("sid") in connected_clients or op.get("sid")) and (op.get("status") or "").upper() in ["BUSY", "IN_CALL", "IN CALL", "IN_MEETING", "IN MEETING", "MEETING"]
+        ])
         active_kiosks_count = len([k for k in online_kiosks.values() if k.get("sid") in connected_clients or k.get("sid")])
+        online_ops_total = available_count + in_meeting_count
+
+        total_kiosks = 0
+        total_operators = 0
+        try:
+            from app.core.database import SessionLocal
+            import app.db.models as models
+            with SessionLocal() as db:
+                total_kiosks = db.query(models.Device).filter(models.Device.device_type == "kiosk").count()
+                total_operators = db.query(models.Operator).count()
+        except Exception:
+            pass
+
+        if total_kiosks == 0:
+            total_kiosks = max(5, active_kiosks_count)
+        if total_operators == 0:
+            total_operators = max(4, online_ops_total)
+
         payload = {
             "operators": {
-                "online": available_count + busy_count,
+                "online": online_ops_total,
                 "available": available_count,
-                "inCall": busy_count,
-                "total": len(online_operators)
+                "inMeeting": in_meeting_count,
+                "inCall": in_meeting_count,
+                "total": total_operators
             },
             "kiosks": {
                 "active": active_kiosks_count,
                 "online": active_kiosks_count,
-                "total": max(5, active_kiosks_count)
+                "total": total_kiosks
             },
-            "online": available_count + busy_count,
+            "online": online_ops_total,
             "available": available_count,
-            "inCall": busy_count,
+            "inMeeting": in_meeting_count,
+            "inCall": in_meeting_count,
             "activeKiosks": active_kiosks_count
         }
         await sio.emit("ADMIN_TELEMETRY_UPDATE", payload)
@@ -329,23 +376,95 @@ async def disconnect(sid: str):
     global call_queue
     logger.info(f"Socket disconnected: {sid}")
     client_info = connected_clients.pop(sid, None)
+    if not client_info:
+        client_id = None
+        role = None
+        for kid, kdata in list(online_kiosks.items()):
+            if kdata.get("sid") == sid:
+                role = "kiosk"
+                client_id = kid
+                break
+        if not role:
+            for op_id, op_data in list(online_operators.items()):
+                if op_data.get("sid") == sid:
+                    role = "operator"
+                    client_id = op_id
+                    break
+        if role:
+            client_info = {"clientId": client_id, "role": role}
+
     if client_info:
         client_id = client_info.get("clientId")
         role = client_info.get("role")
 
         if role == "operator":
+            disconnected_ops = []
             if client_id and client_id in online_operators:
                 online_operators[client_id]["sid"] = None
+                online_operators[client_id]["status"] = "OFFLINE"
+                disconnected_ops.append(client_id)
             for k, op_data in online_operators.items():
                 if op_data.get("sid") == sid:
                     op_data["sid"] = None
+                    op_data["status"] = "OFFLINE"
+                    disconnected_ops.append(k)
+
+            try:
+                from app.core.database import SessionLocal
+                import app.db.models as models
+                db = SessionLocal()
+                try:
+                    for op_id_key in disconnected_ops:
+                        op_row = db.query(models.Operator).filter(
+                            (models.Operator.id == op_id_key) |
+                            (models.Operator.username == op_id_key) |
+                            (models.Operator.employee_code == op_id_key)
+                        ).first()
+                        if op_row:
+                            op_row.status = "offline"
+                            await sio.emit("OPERATORS_UPDATED", {"operatorId": op_row.id, "status": "offline"})
+                    db.commit()
+                finally:
+                    db.close()
+            except Exception as e:
+                logger.error(f"Error marking operator offline on disconnect: {e}")
+
             await broadcast_admin_telemetry()
 
         if role == "kiosk":
+            disconnected_kiosks = []
             for kid, kdata in list(online_kiosks.items()):
-                if kdata.get("sid") == sid:
+                if kdata.get("sid") == sid or kid == client_id:
                     online_kiosks.pop(kid, None)
                     active_kiosk_claims.pop(kid, None)
+                    disconnected_kiosks.append(kid)
+            if client_id and client_id not in disconnected_kiosks:
+                disconnected_kiosks.append(client_id)
+
+            try:
+                from app.core.database import SessionLocal
+                import app.db.models as models
+                db = SessionLocal()
+                try:
+                    for kid in disconnected_kiosks:
+                        dev = db.query(models.Device).filter(
+                            (models.Device.device_id == kid) | (models.Device.id == kid)
+                        ).first()
+                        if dev:
+                            dev.status = "offline"
+                            offline_event = {
+                                "deviceId": dev.device_id,
+                                "status": "offline",
+                                "runtimeEnv": dev.runtime_env
+                            }
+                            await sio.emit("ADMIN_TELEMETRY_UPDATED", offline_event)
+                            await sio.emit("KIOSKS_UPDATED", offline_event)
+                    db.commit()
+                finally:
+                    db.close()
+            except Exception as e:
+                logger.error(f"Error marking kiosk offline on disconnect: {e}")
+
             await broadcast_admin_telemetry()
 
         # Only cancel from queue if call is still waiting in QUEUED state (passenger disconnected before answer)
@@ -446,7 +565,23 @@ async def REGISTER_CLIENT(sid: str, data: Dict[str, Any]):
                 "currentCallId": None
             }
 
+        try:
+            from app.core.database import SessionLocal
+            import app.db.models as models
+            with SessionLocal() as db:
+                op_row = db.query(models.Operator).filter(
+                    (models.Operator.id == client_id) |
+                    (models.Operator.username == client_id) |
+                    (models.Operator.employee_code == client_id)
+                ).first()
+                if op_row:
+                    op_row.status = (online_operators[client_id]["status"] or "available").lower()
+                    db.commit()
+        except Exception as e:
+            logger.error(f"Error syncing operator status on REGISTER_CLIENT: {e}")
+
         await sio.emit("OPERATOR_STATE_SYNC", online_operators[client_id], room=sid)
+        await sio.emit("OPERATORS_UPDATED", {"operatorId": client_id, "status": online_operators[client_id]["status"].lower()})
         await check_and_dispatch_queued_calls()
         await broadcast_admin_telemetry()
 
@@ -494,6 +629,13 @@ async def REGISTER_CLIENT(sid: str, data: Dict[str, Any]):
         except Exception as e:
             logger.error(f"Error updating device status on REGISTER_CLIENT: {e}")
 
+        online_event = {
+            "deviceId": kiosk_id,
+            "status": "online",
+            "runtimeEnv": runtime_env
+        }
+        await sio.emit("ADMIN_TELEMETRY_UPDATED", online_event)
+        await sio.emit("KIOSKS_UPDATED", online_event)
         await broadcast_admin_telemetry()
 
     await sio.emit("REGISTERED_ACK", {"status": "REGISTERED", "role": role, "clientId": client_id}, room=sid)
@@ -578,13 +720,40 @@ async def KIOSK_HEARTBEAT(sid: str, data: Dict[str, Any]):
 async def UNREGISTER_KIOSK(sid: str, data: Dict[str, Any]):
     kiosk_id = data.get("clientId") or data.get("kioskId")
     session_id = data.get("clientSessionId")
+    disconnected_kids = []
     for kid, kdata in list(online_kiosks.items()):
         if kid == kiosk_id or kdata.get("sid") == sid:
             online_kiosks.pop(kid, None)
+            disconnected_kids.append(kid)
+    if kiosk_id and kiosk_id not in disconnected_kids:
+        disconnected_kids.append(kiosk_id)
+
     if kiosk_id:
         curr = active_kiosk_claims.get(kiosk_id)
         if not session_id or (curr and curr.get("sessionId") == session_id):
             active_kiosk_claims.pop(kiosk_id, None)
+
+    try:
+        from app.core.database import SessionLocal
+        import app.db.models as models
+        with SessionLocal() as db:
+            for kid in disconnected_kids:
+                dev = db.query(models.Device).filter(
+                    (models.Device.device_id == kid) | (models.Device.id == kid)
+                ).first()
+                if dev:
+                    dev.status = "offline"
+                    offline_event = {
+                        "deviceId": dev.device_id,
+                        "status": "offline",
+                        "runtimeEnv": dev.runtime_env
+                    }
+                    await sio.emit("ADMIN_TELEMETRY_UPDATED", offline_event)
+                    await sio.emit("KIOSKS_UPDATED", offline_event)
+            db.commit()
+    except Exception as e:
+        logger.error(f"Error marking kiosk offline on UNREGISTER_KIOSK: {e}")
+
     await broadcast_admin_telemetry()
 
 
@@ -763,6 +932,21 @@ async def OPERATOR_ACCEPT_CALL(sid: str, data: Dict[str, Any]):
         online_operators[operator_id]["currentCallId"] = call_id
         await sio.emit("OPERATOR_STATE_SYNC", online_operators[operator_id], room=sid)
 
+    try:
+        from app.core.database import SessionLocal
+        import app.db.models as models
+        with SessionLocal() as db:
+            op_row = db.query(models.Operator).filter(
+                (models.Operator.id == operator_id) |
+                (models.Operator.username == operator_id) |
+                (models.Operator.employee_code == operator_id)
+            ).first()
+            if op_row:
+                op_row.status = "busy"
+                db.commit()
+    except Exception as e:
+        logger.error(f"Error updating operator status to busy on accept: {e}")
+
     if sid in connected_clients:
         connected_clients[sid]["active_call_id"] = call_id
 
@@ -783,6 +967,7 @@ async def OPERATOR_ACCEPT_CALL(sid: str, data: Dict[str, Any]):
     await sio.emit("SUPPORT_CALL_CLAIMED", claimed_payload, room="operators")
     await sio.emit("CALL_CLAIMED", claimed_payload, room="operators")
     await sio.emit("INCOMING_CALL_DISMISSED", {"callId": call_id}, room="operators")
+    await sio.emit("OPERATORS_UPDATED", {"operatorId": operator_id, "status": "busy", "currentCallId": call_id})
     await broadcast_admin_telemetry()
 
     accept_payload = {
@@ -806,9 +991,12 @@ async def JOIN_CALL_ROOM(sid: str, data: Dict[str, Any]):
         await sio.enter_room(sid, room_name)
 
         if role == "operator":
+            op_id = data.get("operatorId")
             if call_id in active_calls:
                 active_calls[call_id]["operatorSid"] = sid
                 active_calls[call_id]["status"] = "IN_PROGRESS"
+                if not op_id:
+                    op_id = active_calls[call_id].get("operatorId")
                 if data.get("kioskId"):
                     active_calls[call_id]["kioskId"] = data.get("kioskId")
             else:
@@ -816,10 +1004,33 @@ async def JOIN_CALL_ROOM(sid: str, data: Dict[str, Any]):
                     "callId": call_id,
                     "kioskId": data.get("kioskId") or data.get("clientId") or "Kiosk",
                     "operatorSid": sid,
-                    "operatorId": data.get("operatorId") or "Operator",
+                    "operatorId": op_id or "Operator",
                     "status": "IN_PROGRESS",
                     "startTime": get_current_iso()
                 }
+
+            if op_id:
+                if op_id in online_operators:
+                    online_operators[op_id]["status"] = "BUSY"
+                    online_operators[op_id]["currentCallId"] = call_id
+                    online_operators[op_id]["sid"] = sid
+                try:
+                    from app.core.database import SessionLocal
+                    import app.db.models as models
+                    with SessionLocal() as db:
+                        op_row = db.query(models.Operator).filter(
+                            (models.Operator.id == op_id) |
+                            (models.Operator.username == op_id) |
+                            (models.Operator.employee_code == op_id)
+                        ).first()
+                        if op_row:
+                            op_row.status = "busy"
+                            db.commit()
+                except Exception as e:
+                    logger.error(f"Error marking operator busy on JOIN_CALL_ROOM: {e}")
+
+                await sio.emit("OPERATORS_UPDATED", {"operatorId": op_id, "status": "busy", "currentCallId": call_id})
+                await broadcast_admin_telemetry()
 
         if role == "kiosk" and call_id in active_calls:
             active_calls[call_id]["kioskSid"] = sid
@@ -863,6 +1074,29 @@ async def OPERATOR_READY(sid: str, data: Dict[str, Any]):
                 "status": "IN_PROGRESS",
                 "startTime": get_current_iso()
             }
+
+    if operator_id:
+        if operator_id in online_operators:
+            online_operators[operator_id]["status"] = "BUSY"
+            online_operators[operator_id]["currentCallId"] = call_id
+            online_operators[operator_id]["sid"] = sid
+        try:
+            from app.core.database import SessionLocal
+            import app.db.models as models
+            with SessionLocal() as db:
+                op_row = db.query(models.Operator).filter(
+                    (models.Operator.id == operator_id) |
+                    (models.Operator.username == operator_id) |
+                    (models.Operator.employee_code == operator_id)
+                ).first()
+                if op_row:
+                    op_row.status = "busy"
+                    db.commit()
+        except Exception as e:
+            logger.error(f"Error marking operator busy on OPERATOR_READY: {e}")
+
+        await sio.emit("OPERATORS_UPDATED", {"operatorId": operator_id, "status": "busy", "currentCallId": call_id})
+        await broadcast_admin_telemetry()
 
     op_info = get_operator_info(operator_id) if operator_id else {}
     op_name = op_info.get("name") or (active_calls.get(call_id, {}).get("operatorName", "Priya Sharma"))
@@ -938,12 +1172,31 @@ async def END_CALL(sid: str, data: Dict[str, Any]):
             await sio.emit("OPERATOR_STATE_SYNC", online_operators[op_id], room=online_operators[op_id].get("sid", ""))
             await check_and_dispatch_queued_calls()
 
+        try:
+            from app.core.database import SessionLocal
+            import app.db.models as models
+            with SessionLocal() as db:
+                op_row = db.query(models.Operator).filter(
+                    (models.Operator.id == op_id) |
+                    (models.Operator.username == op_id) |
+                    (models.Operator.employee_code == op_id)
+                ).first()
+                if op_row:
+                    op_row.status = "available" if online_operators[op_id].get("status") != "OFFLINE" else "offline"
+                    db.commit()
+        except Exception as e:
+            logger.error(f"Error resetting operator status on END_CALL: {e}")
+
+        await sio.emit("OPERATORS_UPDATED", {"operatorId": op_id, "status": "available" if online_operators[op_id].get("status") != "OFFLINE" else "offline", "currentCallId": None})
+        await broadcast_admin_telemetry()
+
     await sio.emit("CALL_ENDED", {
         "callId": call_id,
         "reason": reason,
         "operatorName": op_name,
         "durationSeconds": duration_seconds
     }, room=room_name)
+    await broadcast_admin_telemetry()
 
 
 @sio.event
