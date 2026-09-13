@@ -166,7 +166,8 @@ def compute_indoor_route(
             "distanceMeters": 25.0
         })
 
-    walk_time_sec = int(total_distance / 1.1)
+    # Kiosk UX calibration: 100 metres is approximately one walking minute.
+    walk_time_sec = int(total_distance * 60 / 100)
     sync_token = f"NAV-DEL-{uuid.uuid4().hex[:6].upper()}"
 
     return {

@@ -44,6 +44,7 @@ class SupportCall(Base, TimestampMixin):
     flight_number = Column(String, nullable=True)
     pnr = Column(String, nullable=True)
     recording_url = Column(String, nullable=True)
+    recording_status = Column(String, default="unavailable")
     recording_duration_seconds = Column(Integer, default=0)
 
     kiosk = relationship("Kiosk")
@@ -69,4 +70,3 @@ class QueryTagCategory(Base):
     sub_items_json = Column(JSON, nullable=True)  # JSON array or string
     sort_order = Column(Integer, default=0)
     is_active = Column(Boolean, default=True)
-

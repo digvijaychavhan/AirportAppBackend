@@ -127,6 +127,21 @@ def get_recordings_dir() -> str:
     os.makedirs(rec_dir, exist_ok=True)
     return rec_dir
 
+
+def find_call_recording(call_id: str):
+    """Return the canonical/legacy recording URL and filename for a call."""
+    recordings_dir = get_recordings_dir()
+    candidates = (
+        f"recording_{call_id}.webm",
+        f"recording_{call_id}.mp4",
+        f"{call_id}.webm",
+        f"{call_id}.mp4",
+    )
+    for filename in candidates:
+        if os.path.exists(os.path.join(recordings_dir, filename)):
+            return f"/recordings/{filename}", filename
+    return None, None
+
 def get_operator_info(operator_id: str) -> Dict[str, str]:
     if not operator_id:
         return {"id": "op_101", "name": "Priya Sharma", "role": "Customer Support Executive"}
@@ -301,13 +316,9 @@ def auto_save_support_call(call_id: str, session: Optional[Dict[str, Any]], dura
         import app.db.models as models
         db = SessionLocal()
         try:
-            recordings_dir = get_recordings_dir()
             rec_url = (session or {}).get("recordingUrl")
             if not rec_url:
-                if os.path.exists(os.path.join(recordings_dir, f"{call_id}.webm")):
-                    rec_url = f"/recordings/{call_id}.webm"
-                elif os.path.exists(os.path.join(recordings_dir, f"{call_id}.mp4")):
-                    rec_url = f"/recordings/{call_id}.mp4"
+                rec_url, _ = find_call_recording(call_id)
 
             existing = db.query(models.SupportCall).filter(models.SupportCall.id == call_id).first()
             kiosk_id = (session or {}).get("kioskId", "T3-L1-K04")
@@ -337,6 +348,7 @@ def auto_save_support_call(call_id: str, session: Optional[Dict[str, Any]], dura
                     existing.flight_number = flight_number
                 if rec_url and not existing.recording_url:
                     existing.recording_url = rec_url
+                existing.recording_status = "available" if rec_url else "uploading"
 
                 db.commit()
                 logger.info(f"Auto-save updated support call {call_id}")
@@ -352,7 +364,8 @@ def auto_save_support_call(call_id: str, session: Optional[Dict[str, Any]], dura
                     passenger_name=passenger_name,
                     flight_number=flight_number,
                     pnr=pnr,
-                    recording_url=rec_url
+                    recording_url=rec_url,
+                    recording_status="available" if rec_url else "uploading"
                 )
                 db.add(new_call)
                 db.commit()

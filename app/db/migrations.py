@@ -57,6 +57,7 @@ def run_migrations():
                 if sc_cols:
                     sc_columns = [
                         ("recording_url", "VARCHAR"),
+                        ("recording_status", "VARCHAR DEFAULT 'unavailable'"),
                         ("recording_duration_seconds", "INTEGER DEFAULT 0"),
                         ("wait_duration_seconds", "INTEGER DEFAULT 0"),
                         ("call_duration_seconds", "INTEGER DEFAULT 0"),

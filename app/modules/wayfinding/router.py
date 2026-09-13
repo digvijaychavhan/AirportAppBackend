@@ -188,7 +188,9 @@ async def get_directory_pois(
             "terminal": p.terminal or "",
             "floor": p.floor_name or "",
             "gate": p.gate or "",
-            "distanceM": p.distance_m or 100,
+            # Terminal 1 clients derive this from the navigable route geometry.
+            # Preserve a real configured value, but never invent a 100 m fallback.
+            "distanceM": p.distance_m or 0,
             "image": p.image_url or "",
             "imageUrl": p.image_url or "",
             "badge": p.badge_label or "",

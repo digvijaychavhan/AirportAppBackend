@@ -28,6 +28,7 @@ from app.modules.support.service import (
     online_operators,
     get_operator_info,
     get_recordings_dir,
+    find_call_recording,
     check_and_dispatch_queued_calls,
     broadcast_admin_telemetry
 )
@@ -133,12 +134,7 @@ async def get_call_details(
     """
     Retrieve call session details, notes, categories, and recording URL.
     """
-    rec_dir = get_recordings_dir()
-    rec_file_url = None
-    if os.path.exists(os.path.join(rec_dir, f"{call_id}.webm")):
-        rec_file_url = f"/recordings/{call_id}.webm"
-    elif os.path.exists(os.path.join(rec_dir, f"{call_id}.mp4")):
-        rec_file_url = f"/recordings/{call_id}.mp4"
+    rec_file_url, rec_filename = find_call_recording(call_id)
 
     if call_id in active_calls:
         session = active_calls[call_id]
@@ -156,7 +152,10 @@ async def get_call_details(
                 **session,
                 "operatorName": op_name or "Priya Sharma",
                 "operatorRole": op_role or "Customer Support Executive",
-                "recordingUrl": session.get("recordingUrl") or rec_file_url
+                "recordingUrl": session.get("recordingUrl") or rec_file_url,
+                "recordingId": call_id,
+                "recordingName": rec_filename or f"recording_{call_id}.webm",
+                "recordingStatus": "AVAILABLE" if rec_file_url else "RECORDING"
             }
         }
 
@@ -187,6 +186,7 @@ async def get_call_details(
                     op_name = call.operator_id
 
             rec_url = call.recording_url or rec_file_url
+            recording_name = os.path.basename(rec_url) if rec_url else f"recording_{call.id}.webm"
 
             data = {
                 "sessionId": call.id,
@@ -201,6 +201,9 @@ async def get_call_details(
                 "notes": call.operator_notes or "",
                 "categories": categories_list,
                 "recordingUrl": rec_url,
+                "recordingId": call.id,
+                "recordingName": recording_name,
+                "recordingStatus": "AVAILABLE" if rec_url else (call.recording_status or "unavailable").upper(),
                 "date": call.created_at.strftime("%d-%b-%y"),
                 "time": call.created_at.strftime("%I:%M %p"),
                 "status": "RESOLVED"
@@ -216,6 +219,9 @@ async def get_call_details(
                 "sessionId": call_id,
                 "passengerName": "",
                 "recordingUrl": rec_file_url,
+                "recordingId": call_id,
+                "recordingName": rec_filename,
+                "recordingStatus": "AVAILABLE",
                 "status": "RESOLVED"
             }
         }
@@ -264,13 +270,9 @@ async def submit_operator_log(
         ).first() if raw_op_id else None
         op_id = op_obj.id if op_obj else (raw_op_id or "op_101")
 
-        rec_dir = get_recordings_dir()
         rec_url = payload.recording_url
         if not rec_url and session_id:
-            if os.path.exists(os.path.join(rec_dir, f"{session_id}.webm")):
-                rec_url = f"/recordings/{session_id}.webm"
-            elif os.path.exists(os.path.join(rec_dir, f"{session_id}.mp4")):
-                rec_url = f"/recordings/{session_id}.mp4"
+            rec_url, _ = find_call_recording(session_id)
 
         existing_call = db.query(models.SupportCall).filter(models.SupportCall.id == session_id).first() if session_id else None
         if existing_call:
@@ -287,6 +289,7 @@ async def submit_operator_log(
             existing_call.pnr = payload.pnr or ""
             if rec_url and not existing_call.recording_url:
                 existing_call.recording_url = rec_url
+            existing_call.recording_status = "available" if (existing_call.recording_url or rec_url) else "uploading"
             existing_call.status = "ended"
             db.commit()
             support_call = existing_call
@@ -302,7 +305,8 @@ async def submit_operator_log(
                 passenger_name=passenger_name,
                 flight_number=payload.flight_no or payload.flight_number or "",
                 pnr=payload.pnr or "",
-                recording_url=rec_url
+                recording_url=rec_url,
+                recording_status="available" if rec_url else "uploading"
             )
             db.add(support_call)
             db.commit()
@@ -317,7 +321,10 @@ async def submit_operator_log(
             "notes": support_call.operator_notes,
             "categories": categories,
             "flightNo": support_call.flight_number,
-            "recordingUrl": support_call.recording_url
+            "recordingUrl": support_call.recording_url,
+            "recordingId": support_call.id,
+            "recordingName": os.path.basename(support_call.recording_url) if support_call.recording_url else f"recording_{support_call.id}.webm",
+            "recordingStatus": (support_call.recording_status or "uploading").upper()
         }
 
         return {"success": True, "message": "Log saved successfully", "data": res_data}
@@ -432,8 +439,6 @@ async def get_operator_logs(
 
         total = query.count()
         calls = query.order_by(models.SupportCall.created_at.desc()).offset(offset).limit(limit).all()
-        rec_dir = get_recordings_dir()
-
         logs = []
         for c in calls:
             kiosk_code = c.kiosk.code if c.kiosk else (c.kiosk_id or "T3-L1-K04")
@@ -444,11 +449,9 @@ async def get_operator_logs(
             rec_url = c.recording_url
             if rec_url and "/api/v1/recordings/" in rec_url:
                 rec_url = rec_url.replace("/api/v1/recordings/", "/recordings/")
+            recording_name = os.path.basename(rec_url) if rec_url else None
             if not rec_url:
-                if os.path.exists(os.path.join(rec_dir, f"{c.id}.webm")):
-                    rec_url = f"/recordings/{c.id}.webm"
-                elif os.path.exists(os.path.join(rec_dir, f"{c.id}.mp4")):
-                    rec_url = f"/recordings/{c.id}.mp4"
+                rec_url, recording_name = find_call_recording(c.id)
 
             op_name = c.operator.name if c.operator else "Priya Sharma"
             op_code = c.operator.employee_code if c.operator else "EMP-9021"
@@ -465,6 +468,9 @@ async def get_operator_logs(
                 "status": "RESOLVED",
                 "categories": c.issue_category.split(", ") if c.issue_category else [],
                 "recordingUrl": rec_url,
+                "recordingId": c.id,
+                "recordingName": recording_name or f"recording_{c.id}.webm",
+                "recordingStatus": "AVAILABLE" if rec_url else (c.recording_status or "unavailable").upper(),
                 "flightNo": c.flight_number or "",
                 "operatorId": op_id_val,
                 "operatorName": op_name,
@@ -509,7 +515,7 @@ async def upload_call_recording(
     try:
         content_type = request.headers.get("content-type", "")
         file_bytes = b""
-        filename = f"{call_id}.webm"
+        extension = "webm"
 
         if "multipart/form-data" in content_type:
             form = await request.form()
@@ -517,13 +523,14 @@ async def upload_call_recording(
             if upload_file:
                 file_bytes = await upload_file.read()
                 if hasattr(upload_file, "filename") and upload_file.filename and upload_file.filename.endswith(".mp4"):
-                    filename = f"{call_id}.mp4"
+                    extension = "mp4"
         else:
             file_bytes = await request.body()
 
         if not file_bytes:
             raise HTTPException(status_code=400, detail="Empty recording payload")
 
+        filename = f"recording_{call_id}.{extension}"
         rec_dir = get_recordings_dir()
         dest_path = os.path.join(rec_dir, filename)
 
@@ -538,6 +545,7 @@ async def upload_call_recording(
         call = db.query(models.SupportCall).filter(models.SupportCall.id == call_id).first()
         if call:
             call.recording_url = rel_url
+            call.recording_status = "available"
             db.commit()
         else:
             new_call = models.SupportCall(
@@ -549,16 +557,26 @@ async def upload_call_recording(
                 issue_category="General Inquiry",
                 operator_notes="Assisted passenger at kiosk.",
                 passenger_name="",
-                recording_url=rel_url
+                recording_url=rel_url,
+                recording_status="available"
             )
             db.add(new_call)
             db.commit()
 
+        recording_event = {
+            "callId": call_id,
+            "recordingId": call_id,
+            "recordingName": filename,
+            "recordingUrl": rel_url,
+            "recordingStatus": "AVAILABLE",
+        }
+        await sio.emit("RECORDING_AVAILABLE", recording_event, room="operators")
+
         return {
             "success": True,
             "message": "Recording uploaded and linked successfully",
-            "callId": call_id,
-            "recordingUrl": rel_url,
+            **recording_event,
+            "data": recording_event,
             "sizeBytes": len(file_bytes)
         }
     except HTTPException:
@@ -584,11 +602,8 @@ async def download_recording(call_id: str):
         )
 
     rec_dir = get_recordings_dir()
-    filename = f"{call_id}.webm"
-    file_path = os.path.join(rec_dir, filename)
-    if not os.path.exists(file_path):
-        filename = f"{call_id}.mp4"
-        file_path = os.path.join(rec_dir, filename)
+    _, filename = find_call_recording(call_id)
+    file_path = os.path.join(rec_dir, filename) if filename else ""
 
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Recording file not found")
@@ -596,8 +611,8 @@ async def download_recording(call_id: str):
     return FileResponse(
         path=file_path,
         media_type="video/webm" if filename.endswith(".webm") else "video/mp4",
-        filename=f"call_recording_{call_id}.webm",
-        headers={"Content-Disposition": f'attachment; filename="call_recording_{call_id}.webm"'}
+        filename=filename,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
 
 
@@ -662,4 +677,3 @@ async def get_operator_call_tags(db: Session = Depends(get_db)):
                 {"id": "cat10", "name": "Travel Documentation", "subItems": ["Visa", "Passport", "Requirements"]},
             ]
         }
-
