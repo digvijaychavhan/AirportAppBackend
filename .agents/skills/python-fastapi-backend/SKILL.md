@@ -90,8 +90,7 @@ Backend/
 ├── services/                      # Legacy re-export facades → app.modules.*.service
 ├── routes/                        # ⚠️ DEAD CODE — never imported, never mounted
 ├── seed.py                        # Root seeder entrypoint
-├── requirements.txt
-└── Dockerfile
+└── requirements.txt
 ```
 
 > **Rule**: All new code goes into `app/modules/<domain>/`. Never create files in root `routes/` or `services/`.

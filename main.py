@@ -1,6 +1,6 @@
 """
 Airport Helpdesk ASGI Root Entrypoint
-Exports combined_app for Uvicorn multi-worker deployments, systemd, and Docker.
+Exports combined_app for Uvicorn multi-worker deployments and systemd services.
 """
 
 from app.main import combined_app, fastapi_app, app
